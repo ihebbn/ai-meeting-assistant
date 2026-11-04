@@ -1,0 +1,11 @@
+node_modules/
+dist/
+dist-electron/
+out-tsc/
+release/
+.angular/
+*.log
+.DS_Store
+Thumbs.db
+*.exe
+*.blockmap

@@ -1,0 +1,95 @@
+<div class="page">
+  <header>
+    <div>
+      <h1>Meeting Copilot — Settings</h1>
+      <p class="sub">
+        Unified overlay capture exclusion is separate from live Meet/Teams verification while dragging,
+        resizing, collapsing, and reopening.
+      </p>
+    </div>
+    <div class="header-actions">
+      <button type="button" (click)="refresh()">Refresh</button>
+      <button type="button" (click)="openLogFolder()">Open log folder</button>
+      <button type="button" class="danger" (click)="quit()">Quit app</button>
+    </div>
+  </header>
+
+  @if (snapshot(); as snap) {
+    <section class="cards">
+      <article>
+        <h2>Runtime</h2>
+        <ul>
+          <li><span>Windows build</span><strong>{{ snap.windowsBuild }}</strong></li>
+          <li><span>Electron</span><strong>{{ snap.electronVersion }}</strong></li>
+          <li><span>Chrome</span><strong>{{ snap.chromeVersion }}</strong></li>
+          <li><span>App</span><strong>{{ snap.appVersion }}</strong></li>
+        </ul>
+      </article>
+
+      <article>
+        <h2>Content protection (Electron API)</h2>
+        <ul>
+          @if (snap.contentProtection.enabledForDesignCapture) {
+            <li>
+              <span>Design capture mode</span>
+              <strong class="bad">ON — screenshots can capture the overlay</strong>
+            </li>
+          }
+          <li>
+            <span>All requested windows</span>
+            <strong [class.ok]="snap.contentProtection.applied" [class.bad]="!snap.contentProtection.applied">
+              {{ snap.contentProtection.applied ? 'Applied' : (snap.contentProtection.enabledForDesignCapture ? 'Disabled for screenshots' : 'Incomplete') }}
+            </strong>
+          </li>
+          @for (entry of snap.contentProtection.windows | keyvalue; track entry.key) {
+            <li>
+              <span>{{ entry.key }}</span>
+              <strong [class.ok]="entry.value" [class.bad]="!entry.value">
+                {{ entry.value ? 'Protected' : 'Not protected' }}
+              </strong>
+            </li>
+          }
+          <li>
+            <span>Last error</span>
+            <strong>{{ snap.contentProtection.lastError || 'None' }}</strong>
+          </li>
+        </ul>
+      </article>
+
+      <article>
+        <h2>Unified overlay session</h2>
+        <ul>
+          <li><span>Listening</span><strong>{{ snap.session.listening ? 'Yes (sample)' : 'Paused' }}</strong></li>
+          <li><span>Panels hidden</span><strong>{{ snap.session.panelsHidden ? 'Yes (toolbar only)' : 'No' }}</strong></li>
+          <li><span>Insights open</span><strong>{{ snap.session.insightsVisible ? 'Yes' : 'Collapsed' }}</strong></li>
+          <li><span>AI response open</span><strong>{{ snap.session.responseVisible ? 'Yes' : 'Collapsed' }}</strong></li>
+          <li>
+            <span>Panel size</span>
+            <strong>{{ snap.session.panelSize.width }} × {{ snap.session.panelSize.height }}</strong>
+          </li>
+          <li><span>Hide / restore</span><strong>{{ snap.session.hideShortcutLabel }}</strong></li>
+          <li><span>Ask AI</span><strong>{{ snap.session.askShortcutLabel }}</strong></li>
+          <li><span>Log file</span><strong class="path">{{ snap.logFilePath }}</strong></li>
+        </ul>
+        <p class="note">{{ snap.externalShareVerification }}</p>
+      </article>
+    </section>
+  } @else {
+    <p class="loading">Loading snapshot…</p>
+  }
+
+  <section class="log">
+    <h2>Local log</h2>
+    <div class="log-box">
+      @for (entry of logs(); track entry.ts + entry.message) {
+        <div class="line" [attr.data-level]="entry.level">
+          <time>{{ entry.ts }}</time>
+          <span class="level">{{ entry.level }}</span>
+          <span>{{ entry.message }}</span>
+        </div>
+      } @empty {
+        <p>No log entries yet.</p>
+      }
+    </div>
+  </section>
+</div>

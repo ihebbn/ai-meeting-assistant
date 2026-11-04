@@ -1,0 +1,64 @@
+@if (session(); as snap) {
+  <section class="panel" aria-label="Live insights">
+    <header class="header">
+      <div class="title-row">
+        <svg class="spark" viewBox="0 0 24 24" aria-hidden="true">
+          <path
+            fill="currentColor"
+            d="M12 3l1.4 4.2L18 9l-4.2 1.4L12 15l-1.4-4.6L6 9l4.6-1.8L12 3zm6 10 .8 2.4L21 16l-2.2.8L18 19l-.8-2.2L15 16l2.2-.6L18 13zM5 14l.7 2L8 17l-2.3.7L5 20l-.7-2.3L2 17l2.3-.9L5 14z"
+          />
+        </svg>
+        <h1>Live insights</h1>
+      </div>
+
+      <div class="header-actions">
+        <button type="button" class="text-btn" (click)="toggleTranscript()">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M5 5h14v2H5V5zm0 6h14v2H5v-2zm0 6h10v2H5v-2z"
+            />
+          </svg>
+          {{ showTranscript() ? 'Hide transcript' : 'Show transcript' }}
+        </button>
+        <button type="button" class="icon-btn" aria-label="Collapse Live insights" (click)="collapse()">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M7 14l5-5 5 5H7z" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="body">
+      @if (showTranscript()) {
+        <div class="transcript">
+          @for (line of snap.transcript; track line.id) {
+            <p>
+              <strong>{{ line.speaker }}</strong>
+              {{ line.text }}
+            </p>
+          }
+        </div>
+      } @else {
+        <h2>{{ snap.topic }}</h2>
+        <ul class="recap">
+          @for (item of snap.recap; track item) {
+            <li>{{ item }}</li>
+          }
+        </ul>
+
+        <h3>Actions</h3>
+        <div class="actions">
+          @for (action of snap.actions; track action.id) {
+            <button type="button" class="action" (click)="runAction(action.id)">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path [attr.d]="iconPath(action.icon)" fill="currentColor" />
+              </svg>
+              <span>{{ action.label }}</span>
+            </button>
+          }
+        </div>
+      }
+    </div>
+  </section>
+}

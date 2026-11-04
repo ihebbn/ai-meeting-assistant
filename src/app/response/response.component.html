@@ -1,0 +1,59 @@
+@if (session(); as snap) {
+  <section class="panel" aria-label="AI response">
+    <header class="header">
+      <h1>AI response</h1>
+
+      @if (snap.currentQuestion) {
+        <div class="question-pill" [title]="snap.currentQuestion">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M12 3a9 9 0 1 0 0 18 9 9 0 0 0 0-18zm0 2c1.7 0 3.2 2.7 3.7 6H8.3C8.8 7.7 10.3 5 12 5zm-3.9 8h7.8c-.5 3.3-2 6-3.9 6s-3.4-2.7-3.9-6z"
+            />
+          </svg>
+          <span>{{ snap.currentQuestion }}</span>
+        </div>
+      }
+
+      <div class="header-actions">
+        <button type="button" class="icon-btn" aria-label="Copy answer" (click)="copy()">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path
+              fill="currentColor"
+              d="M9 3h9a2 2 0 0 1 2 2v11h-2V5H9V3zm-4 4h9a2 2 0 0 1 2 2v12a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V9a2 2 0 0 1 2-2zm0 2v12h9V9H5z"
+            />
+          </svg>
+        </button>
+        <button type="button" class="icon-btn" aria-label="Collapse AI response" (click)="collapse()">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path fill="currentColor" d="M7 14l5-5 5 5H7z" />
+          </svg>
+        </button>
+      </div>
+    </header>
+
+    <div class="body">
+      <p class="answer" [class.streaming]="streaming()">
+        {{ assistantText() || 'Ask a question or choose an action from Live insights.' }}
+        @if (streaming()) {
+          <span class="caret" aria-hidden="true"></span>
+        }
+      </p>
+    </div>
+
+    <footer class="composer">
+      <input
+        type="text"
+        [ngModel]="draft"
+        (ngModelChange)="onDraftChange($event)"
+        (keydown)="onKeydown($event)"
+        placeholder="Ask a follow-up…"
+        aria-label="Follow-up question"
+      />
+      <button type="button" class="submit" (click)="submit()" [disabled]="!draft.trim()">
+        <span>Submit</span>
+        <kbd>Enter</kbd>
+      </button>
+    </footer>
+  </section>
+}

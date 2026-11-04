@@ -1,0 +1,228 @@
+:host {
+  display: block;
+  width: 100%;
+  height: 100%;
+}
+
+.toolbar {
+  height: 100%;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px 0 4px;
+  border-radius: var(--radius-pill);
+  background: linear-gradient(180deg, rgba(40, 40, 44, 0.88), rgba(20, 20, 22, 0.78));
+  border: 1px solid var(--glass-border);
+  box-shadow: var(--shadow), inset 0 1px 0 var(--glass-highlight);
+  backdrop-filter: blur(28px) saturate(140%);
+  -webkit-backdrop-filter: blur(28px) saturate(140%);
+  -webkit-app-region: no-drag;
+}
+
+.drag-handle {
+  -webkit-app-region: drag;
+  width: 22px;
+  height: 34px;
+  display: grid;
+  place-content: center;
+  gap: 3px;
+  border-radius: 8px;
+  cursor: grab;
+  flex: 0 0 auto;
+}
+
+.drag-handle span {
+  display: block;
+  width: 12px;
+  height: 2px;
+  border-radius: 1px;
+  background: rgba(255, 255, 255, 0.35);
+}
+
+.listen,
+.wave,
+.timer,
+.action,
+.chip,
+.menu,
+.divider,
+.more-btn,
+.hide-btn,
+.icon-btn {
+  -webkit-app-region: no-drag;
+}
+
+.listen {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  background-color: rgba(255, 255, 255, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  color: #fff;
+  flex: 0 0 auto;
+}
+
+.listen.paused {
+  background-color: rgba(96, 165, 250, 0.28);
+  border-color: rgba(96, 165, 250, 0.5);
+  color: #dbeafe;
+}
+
+.listen:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.18);
+}
+
+.listen.paused:hover:not(:disabled) {
+  background-color: rgba(96, 165, 250, 0.36);
+}
+
+.listen svg {
+  width: 16px;
+  height: 16px;
+}
+
+.wave {
+  display: flex;
+  align-items: flex-end;
+  gap: 3px;
+  height: 18px;
+  width: 34px;
+}
+
+.wave span {
+  width: 3px;
+  border-radius: 2px;
+  background: #93c5fd;
+  animation: pulse 1s ease-in-out infinite;
+}
+
+.wave span:nth-child(1) { height: 6px; animation-delay: 0s; }
+.wave span:nth-child(2) { height: 14px; animation-delay: 0.1s; }
+.wave span:nth-child(3) { height: 10px; animation-delay: 0.2s; }
+.wave span:nth-child(4) { height: 16px; animation-delay: 0.15s; }
+.wave span:nth-child(5) { height: 8px; animation-delay: 0.05s; }
+
+.wave.idle span {
+  animation: none;
+  opacity: 0.35;
+  height: 5px;
+}
+
+@keyframes pulse {
+  0%, 100% { transform: scaleY(0.55); opacity: 0.65; }
+  50% { transform: scaleY(1); opacity: 1; }
+}
+
+.timer {
+  min-width: 44px;
+  font-variant-numeric: tabular-nums;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+}
+
+.divider {
+  width: 1px;
+  height: 22px;
+  background: rgba(255, 255, 255, 0.14);
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 10px;
+  border-radius: 10px;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--text-primary);
+}
+
+.action:hover:not(:disabled),
+.icon-btn:hover:not(:disabled),
+.chip:hover:not(:disabled) {
+  background-color: rgba(255, 255, 255, 0.16);
+}
+
+.action:focus-visible,
+.chip:focus-visible,
+.icon-btn:focus-visible,
+.listen:focus-visible {
+  outline: 2px solid rgba(147, 197, 253, 0.85);
+  outline-offset: 2px;
+}
+
+.action.active {
+  color: #dbeafe;
+  background-color: rgba(96, 165, 250, 0.24);
+  border-color: rgba(147, 197, 253, 0.4);
+}
+
+.action span {
+  font-size: 0.84rem;
+  font-weight: 600;
+  color: inherit;
+}
+
+.action svg,
+.icon-btn svg {
+  width: 16px;
+  height: 16px;
+  display: block;
+  color: inherit;
+}
+
+.chip {
+  padding: 5px 10px;
+  border-radius: 999px;
+  background-color: rgba(255, 255, 255, 0.08);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  font-size: 0.75rem;
+  font-weight: 650;
+  color: var(--text-secondary);
+}
+
+.chip.active {
+  color: #dbeafe;
+  background-color: rgba(96, 165, 250, 0.24);
+  border-color: rgba(147, 197, 253, 0.45);
+}
+
+kbd {
+  font-family: var(--font);
+  font-size: 0.66rem;
+  font-weight: 600;
+  color: var(--text-muted);
+  background: rgba(0, 0, 0, 0.28);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 6px;
+  padding: 2px 5px;
+}
+
+.hide-btn {
+  flex: 0 0 auto;
+}
+
+.more-btn {
+  margin-left: 4px;
+  flex: 0 0 auto;
+}
+
+.icon-btn {
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  display: grid;
+  place-items: center;
+  background-color: rgba(255, 255, 255, 0.1);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: var(--text-secondary);
+}
+
+.icon-btn[aria-expanded='true'] {
+  background-color: rgba(255, 255, 255, 0.16);
+  color: var(--text-primary);
+}

@@ -1,0 +1,34 @@
+<div
+  class="shell"
+  [class.toolbar-only]="!anyPanelOpen()"
+  [class.split]="insightsOpen() && responseOpen()"
+  [class.single]="anyPanelOpen() && !(insightsOpen() && responseOpen())"
+>
+  <div class="toolbar-row">
+    <app-toolbar />
+  </div>
+
+  @if (anyPanelOpen()) {
+    <div class="panels">
+      @if (insightsOpen()) {
+        <div class="panel-slot">
+          <app-insights />
+        </div>
+      }
+      @if (responseOpen()) {
+        <div class="panel-slot">
+          <app-response />
+        </div>
+      }
+      <button
+        type="button"
+        class="resize-handle"
+        aria-label="Resize overlay"
+        (pointerdown)="onResizeStart($event)"
+        (pointermove)="onResizeMove($event)"
+        (pointerup)="onResizeEnd($event)"
+        (pointercancel)="onResizeEnd($event)"
+      ></button>
+    </div>
+  }
+</div>

@@ -1,0 +1,43 @@
+:host {
+  display: block;
+  width: 100%;
+  height: 100%;
+  background: transparent;
+}
+
+.menu {
+  width: 100%;
+  height: 100%;
+  box-sizing: border-box;
+  display: grid;
+  gap: 2px;
+  padding: 6px;
+  border-radius: 12px;
+  background: rgba(24, 24, 26, 0.96);
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 18px 50px rgba(0, 0, 0, 0.35);
+  backdrop-filter: blur(20px) saturate(140%);
+  -webkit-backdrop-filter: blur(20px) saturate(140%);
+  -webkit-app-region: no-drag;
+}
+
+button {
+  text-align: left;
+  padding: 10px 12px;
+  border-radius: 8px;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.96);
+  font: inherit;
+  font-size: 0.84rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+button:hover {
+  background: rgba(255, 255, 255, 0.08);
+}
+
+button.danger {
+  color: #fecaca;
+}
