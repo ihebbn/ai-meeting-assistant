@@ -48,7 +48,9 @@ export const HIDE_ACCELERATOR = 'CommandOrControl+\\';
 
 export const TOOLBAR_HEIGHT = 56;
 export const TOOLBAR_WIDTH = 640;
+/** Padding around panels only; toolbar-only mode uses zero pad for a clean pill edge. */
 export const SHELL_PAD = 8;
+export const TOOLBAR_ONLY_PAD = 0;
 export const PANEL_GAP = 10;
 export const MIN_PANEL_WIDTH = 420;
 export const MIN_PANEL_HEIGHT = 260;

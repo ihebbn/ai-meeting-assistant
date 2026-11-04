@@ -17,6 +17,7 @@ import {
   HIDE_ACCELERATOR,
   PANEL_GAP,
   SHELL_PAD,
+  TOOLBAR_ONLY_PAD,
   SessionState,
   TOOLBAR_HEIGHT,
   TOOLBAR_WIDTH,
@@ -202,8 +203,8 @@ function MIN_SAFE_WIDTH(): number {
 function computeWindowSize(): { width: number; height: number } {
   if (!anyPanelOpen(session)) {
     return {
-      width: TOOLBAR_WIDTH + SHELL_PAD * 2,
-      height: TOOLBAR_HEIGHT + SHELL_PAD * 2,
+      width: TOOLBAR_WIDTH + TOOLBAR_ONLY_PAD * 2,
+      height: TOOLBAR_HEIGHT + TOOLBAR_ONLY_PAD * 2,
     };
   }
   const { width, height } = session.panelSize;
@@ -238,7 +239,7 @@ function ensureMenuWindow(): BrowserWindow {
     maximizable: false,
     fullscreenable: false,
     focusable: true,
-    hasShadow: true,
+    hasShadow: false,
     backgroundColor: '#00000000',
     webPreferences: {
       preload: resolvePreload('preload-menu.js'),
@@ -435,22 +436,27 @@ function createOverlayWindow(): BrowserWindow {
     minimizable: false,
     maximizable: false,
     fullscreenable: false,
-    hasShadow: true,
+    // Window shadow is rectangular; the toolbar/panels draw their own soft shadows.
+    hasShadow: false,
     backgroundColor: '#00000000',
+    roundedCorners: false,
     webPreferences: {
       preload: resolvePreload('preload-overlay.js'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
       webSecurity: true,
+      backgroundThrottling: false,
     },
   });
 
   win.setAlwaysOnTop(true, 'screen-saver');
+  win.setBackgroundColor('#00000000');
   applyContentProtection(win, 'overlay');
 
   win.once('ready-to-show', () => {
     applyContentProtection(win, 'overlay');
+    win.setBackgroundColor('#00000000');
     applyVisibility({ center: true });
     appendLog('info', 'Unified overlay ready.');
   });
