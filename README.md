@@ -24,14 +24,13 @@ Bottom-right handle resizes the panel area as a group (min ~420×260). Long cont
 
 ### Hide
 
-`Ctrl+\` hides the entire overlay and restores it with session state intact.
+`Ctrl+\` hides panels and restores them with session state intact. The toolbar stays visible.
 
-Capture exclusion: `setContentProtection(true)` on the overlay and diagnostics windows.
+Capture exclusion: `setContentProtection(true)` on the overlay and diagnostics windows (can be disabled for design screenshots).
 
 ## Run
 
 ```powershell
-cd d:\clue
 npm install
 npm start
 ```
@@ -42,7 +41,7 @@ Dev: `npm run dev` · Package: `npm run package:win`
 
 | Action | Shortcut |
 | --- | --- |
-| Hide / restore | `Ctrl+\` |
+| Hide / restore panels | `Ctrl+\` |
 | Ask AI | `Ctrl+Enter` |
 | Follow-up submit | `Enter` |
 
