@@ -38,12 +38,26 @@ body {
   overflow: hidden;
   user-select: none;
   -webkit-font-smoothing: antialiased;
-  color-scheme: dark;
+  /* Avoid UA inactive-window fills that fight overlay transparency on Windows. */
+  color-scheme: normal;
+}
+
+html:focus,
+html:focus-within,
+body:focus,
+body:focus-within,
+html:not(:focus),
+body:not(:focus) {
+  background: transparent !important;
+  background-color: transparent !important;
 }
 
 app-root,
-router-outlet {
-  background: transparent;
+router-outlet,
+app-overlay-shell,
+app-toolbar {
+  background: transparent !important;
+  background-color: transparent !important;
 }
 
 button,

@@ -1,4 +1,4 @@
-import { Component, OnInit, computed, inject } from '@angular/core';
+import { Component, HostListener, OnInit, computed, inject } from '@angular/core';
 import { getApi } from '../electron-api';
 import { InsightsComponent } from '../insights/insights.component';
 import { ResponseComponent } from '../response/response.component';
@@ -11,6 +11,9 @@ import { ToolbarComponent } from '../toolbar/toolbar.component';
   imports: [ToolbarComponent, InsightsComponent, ResponseComponent],
   templateUrl: './overlay-shell.component.html',
   styleUrl: './overlay-shell.component.css',
+  host: {
+    '[class.window-inactive]': 'windowInactive',
+  },
 })
 export class OverlayShellComponent implements OnInit {
   private readonly sessions = inject(SessionService);
@@ -18,6 +21,7 @@ export class OverlayShellComponent implements OnInit {
   readonly insightsOpen = computed(() => this.session()?.insightsVisible ?? false);
   readonly responseOpen = computed(() => this.session()?.responseVisible ?? false);
   readonly anyPanelOpen = computed(() => this.session()?.anyPanelOpen ?? false);
+  windowInactive = false;
 
   private resizing = false;
   private startX = 0;
@@ -27,6 +31,28 @@ export class OverlayShellComponent implements OnInit {
 
   ngOnInit(): void {
     void this.sessions.init();
+    this.keepDocumentTransparent();
+  }
+
+  @HostListener('window:blur')
+  onWindowBlur(): void {
+    this.windowInactive = true;
+    this.keepDocumentTransparent();
+  }
+
+  @HostListener('window:focus')
+  onWindowFocus(): void {
+    this.windowInactive = false;
+    this.keepDocumentTransparent();
+  }
+
+  private keepDocumentTransparent(): void {
+    const root = document.documentElement;
+    const body = document.body;
+    root.style.setProperty('background', 'transparent', 'important');
+    root.style.setProperty('background-color', 'transparent', 'important');
+    body.style.setProperty('background', 'transparent', 'important');
+    body.style.setProperty('background-color', 'transparent', 'important');
   }
 
   onResizeStart(event: PointerEvent): void {

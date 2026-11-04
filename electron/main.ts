@@ -28,9 +28,15 @@ import {
 } from './session';
 
 const isDev = process.env['ELECTRON_DEV'] === '1';
+const OVERLAY_BG = '#00000000';
 
 /** Set true to exclude overlay from screenshots / screen share. Off temporarily for design captures. */
 const CONTENT_PROTECTION_ENABLED = false;
+
+// Windows: keep layered-window transparency working for always-on-top overlays.
+if (process.platform === 'win32') {
+  app.commandLine.appendSwitch('enable-transparent-visuals');
+}
 
 type ProtectionState = {
   requested: boolean;
@@ -419,6 +425,49 @@ function applyVisibility(options?: { center?: boolean }): void {
   broadcastSession();
 }
 
+function forceOverlayTransparency(win: BrowserWindow, reason: string): void {
+  if (win.isDestroyed()) {
+    return;
+  }
+  try {
+    win.setBackgroundColor(OVERLAY_BG);
+    // Nudge DWM/Chromium to repaint the layered window after focus changes.
+    const current = win.getOpacity();
+    win.setOpacity(Math.min(current, 0.99));
+    setImmediate(() => {
+      if (win.isDestroyed()) {
+        return;
+      }
+      win.setOpacity(1);
+      win.setBackgroundColor(OVERLAY_BG);
+      if (!win.webContents.isDestroyed()) {
+        win.webContents
+          .executeJavaScript(
+            `(() => {
+              const root = document.documentElement;
+              const body = document.body;
+              if (root) {
+                root.style.setProperty('background', 'transparent', 'important');
+                root.style.setProperty('background-color', 'transparent', 'important');
+              }
+              if (body) {
+                body.style.setProperty('background', 'transparent', 'important');
+                body.style.setProperty('background-color', 'transparent', 'important');
+              }
+              return true;
+            })()`,
+          )
+          .catch(() => undefined);
+      }
+    });
+    if (!reason.includes('deferred') && !reason.includes('wm-')) {
+      appendLog('info', `Overlay transparency reapplied (${reason}).`);
+    }
+  } catch (err) {
+    appendLog('warn', `Failed to reapply overlay transparency: ${String(err)}`);
+  }
+}
+
 function createOverlayWindow(): BrowserWindow {
   const size = computeWindowSize();
   const area = workArea();
@@ -438,8 +487,11 @@ function createOverlayWindow(): BrowserWindow {
     fullscreenable: false,
     // Window shadow is rectangular; the toolbar/panels draw their own soft shadows.
     hasShadow: false,
-    backgroundColor: '#00000000',
+    backgroundColor: OVERLAY_BG,
     roundedCorners: false,
+    thickFrame: false,
+    // Toolbar-style WS_EX_TOOLWINDOW / layered behavior helps keep transparency when inactive on Windows.
+    type: process.platform === 'win32' ? 'toolbar' : 'normal',
     webPreferences: {
       preload: resolvePreload('preload-overlay.js'),
       contextIsolation: true,
@@ -451,14 +503,37 @@ function createOverlayWindow(): BrowserWindow {
   });
 
   win.setAlwaysOnTop(true, 'screen-saver');
-  win.setBackgroundColor('#00000000');
+  win.setBackgroundColor(OVERLAY_BG);
   applyContentProtection(win, 'overlay');
+
+  if (process.platform === 'win32') {
+    // WM_NCACTIVATE (0x0086): stop Windows from painting the inactive client fill
+    // that turns transparent overlays into a solid rectangle when focus is lost.
+    win.hookWindowMessage(0x0086, () => {
+      setImmediate(() => forceOverlayTransparency(win, 'wm-ncactivate'));
+      return true;
+    });
+    // WM_ACTIVATE (0x0006): same class of inactive-repaint issues on some builds.
+    win.hookWindowMessage(0x0006, () => {
+      setImmediate(() => forceOverlayTransparency(win, 'wm-activate'));
+      return false;
+    });
+  }
 
   win.once('ready-to-show', () => {
     applyContentProtection(win, 'overlay');
-    win.setBackgroundColor('#00000000');
+    forceOverlayTransparency(win, 'ready-to-show');
     applyVisibility({ center: true });
     appendLog('info', 'Unified overlay ready.');
+  });
+
+  win.on('show', () => forceOverlayTransparency(win, 'show'));
+  win.on('focus', () => forceOverlayTransparency(win, 'focus'));
+  win.on('blur', () => {
+    // Windows often paints an opaque rect into transparent windows when inactive.
+    forceOverlayTransparency(win, 'blur');
+    setTimeout(() => forceOverlayTransparency(win, 'blur-deferred'), 50);
+    setTimeout(() => forceOverlayTransparency(win, 'blur-deferred-2'), 200);
   });
 
   win.on('closed', () => {
