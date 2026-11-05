@@ -32,7 +32,49 @@
     <div class="body" #scrollBody (scroll)="onTranscriptScroll($event)">
       @if (showTranscript()) {
         <div class="transcript">
-          @if (snap.listenError) {
+          <div class="asr-bar" aria-label="Transcription settings">
+            <label class="asr-field">
+              <span>Backend</span>
+              <select
+                [value]="snap.asrBackend"
+                (change)="onBackendChange($event)"
+              >
+                <option value="qwen">Qwen3-ASR</option>
+                <option value="whisper">Whisper</option>
+              </select>
+            </label>
+            <label class="asr-field">
+              <span>Language</span>
+              <select
+                [value]="snap.asrLanguage"
+                (change)="onLanguageChange($event)"
+              >
+                <option value="auto">Auto</option>
+                <option value="en">English</option>
+                <option value="fr">French</option>
+                <option value="ar">Arabic</option>
+              </select>
+            </label>
+            <label class="asr-check">
+              <input
+                type="checkbox"
+                [checked]="snap.asrCompareMode"
+                (change)="onCompareChange($event)"
+              />
+              Compare
+            </label>
+          </div>
+          <p class="asr-meta">
+            {{ snap.asrModelLabel }}
+            · Lang {{ snap.asrLanguage === 'auto' ? 'Auto' : snap.asrLanguage }}
+            @if (snap.detectedLanguage) {
+              · Detected {{ snap.detectedLanguage }}
+            }
+          </p>
+          @if (snap.asrSetupMessage) {
+            <p class="listen-error">{{ snap.asrSetupMessage }}</p>
+          }
+          @if (snap.listenError && snap.listenError !== snap.asrSetupMessage) {
             <p class="listen-error">{{ snap.listenError }}</p>
             @if (isMicError(snap.listenError)) {
               <button type="button" class="text-btn mic-fix" (click)="openMicSettings()">
@@ -51,7 +93,12 @@
           }
           @for (line of snap.transcript; track line.id) {
             <p [attr.data-speaker]="line.speaker">
-              <strong>{{ line.speaker }}</strong>
+              <strong>
+                {{ line.speaker }}
+                @if (line.language) {
+                  <span class="lang-tag">{{ line.language }}</span>
+                }
+              </strong>
               {{ line.text }}
             </p>
           }

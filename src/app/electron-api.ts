@@ -4,10 +4,24 @@ export type InsightAction = {
   icon: 'book' | 'globe' | 'chat' | 'sparkle' | 'reply';
 };
 
+export type AsrBackendId = 'qwen' | 'whisper';
+export type AsrLanguageId = 'auto' | 'en' | 'fr' | 'ar';
+
 export type TranscriptLine = {
   id: string;
   speaker: string;
   text: string;
+  language?: string | null;
+  backend?: AsrBackendId | null;
+  latencyMs?: number | null;
+};
+
+export type TranscriptResult = {
+  text: string;
+  language: string | null;
+  latencyMs: number;
+  backend: AsrBackendId;
+  compare?: TranscriptResult[];
 };
 
 export type AiMessage = {
@@ -57,6 +71,12 @@ export type SessionView = {
   listenStatus: ListenStatus;
   listenError: string | null;
   modelReady: boolean;
+  asrBackend: AsrBackendId;
+  asrLanguage: AsrLanguageId;
+  asrCompareMode: boolean;
+  detectedLanguage: string | null;
+  asrModelLabel: string;
+  asrSetupMessage: string | null;
 };
 
 export type ProtectionState = {
@@ -133,6 +153,9 @@ export type MeetingCopilotApi = {
     speaker: string;
     text: string;
     id?: string;
+    language?: string | null;
+    backend?: AsrBackendId | null;
+    latencyMs?: number | null;
   }) => Promise<SessionView>;
   upsertTranscript?: (line: {
     id: string;
@@ -141,11 +164,15 @@ export type MeetingCopilotApi = {
     provisional?: boolean;
   }) => Promise<SessionView>;
   ensureTranscriber?: () => Promise<{ ready: boolean; error: string | null }>;
+  getAsrStatus?: () => Promise<unknown>;
+  setAsrBackend?: (backend: AsrBackendId) => Promise<SessionView>;
+  setAsrLanguage?: (language: AsrLanguageId) => Promise<SessionView>;
+  setCompareMode?: (enabled: boolean) => Promise<SessionView>;
   transcribePcm?: (payload: {
     source: 'you' | 'system';
     sampleRate: number;
     pcm: number[];
-  }) => Promise<string>;
+  }) => Promise<TranscriptResult | string>;
 };
 
 declare global {

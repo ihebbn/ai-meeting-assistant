@@ -45,5 +45,12 @@ contextBridge.exposeInMainWorld('meetingCopilot', {
   upsertTranscript: (line: unknown) =>
     ipcRenderer.invoke('session:upsert-transcript', line),
   ensureTranscriber: () => ipcRenderer.invoke('listen:ensure-transcriber'),
+  getAsrStatus: () => ipcRenderer.invoke('listen:get-asr-status'),
+  setAsrBackend: (backend: unknown) =>
+    ipcRenderer.invoke('listen:set-asr-backend', backend),
+  setAsrLanguage: (language: unknown) =>
+    ipcRenderer.invoke('listen:set-asr-language', language),
+  setCompareMode: (enabled: unknown) =>
+    ipcRenderer.invoke('listen:set-compare-mode', enabled),
   transcribePcm: (payload: unknown) => ipcRenderer.invoke('listen:transcribe-pcm', payload),
 });

@@ -31,11 +31,23 @@ import {
   createInitialSession,
 } from './session';
 import {
+  bumpListenGeneration,
   ensureTranscriber,
+  getAsrBackend,
+  getAsrLanguage,
   getTranscriberError,
+  getTranscriberStatus,
+  isCompareMode,
   isTranscriberReady,
+  onTranscriberStatus,
+  setAsrBackend,
+  setAsrLanguage,
+  setCompareMode,
   transcribePcm,
+  warmTranscriber,
+  type TranscriptResult,
 } from './transcriber';
+import type { AsrBackendId, AsrLanguageId } from './session';
 
 const isDev = process.env['ELECTRON_DEV'] === '1';
 const OVERLAY_BG = '#00000000';
@@ -622,6 +634,44 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+function emptyTranscriptResult(): TranscriptResult {
+  return {
+    text: '',
+    language: null,
+    latencyMs: 0,
+    backend: getAsrBackend(),
+  };
+}
+
+function logTranscriptResult(source: string, result: TranscriptResult): void {
+  if (!result.text && !result.compare?.length) {
+    return;
+  }
+  if (result.compare?.length) {
+    for (const item of result.compare) {
+      appendLog(
+        'info',
+        `Compare ${source}/${item.backend}${item.language ? ` [${item.language}]` : ''} ${item.latencyMs}ms: ${(item.text || '(blank)').slice(0, 80)}`,
+      );
+    }
+    return;
+  }
+  appendLog(
+    'info',
+    `Transcribed ${source}/${result.backend}${result.language ? ` [${result.language}]` : ''} ${result.latencyMs}ms: ${result.text.slice(0, 80)}${result.text.length > 80 ? '…' : ''}`,
+  );
+}
+
+function syncAsrSessionFields(): void {
+  const status = getTranscriberStatus();
+  session.asrBackend = status.backend;
+  session.asrLanguage = status.language;
+  session.asrCompareMode = status.compareMode;
+  session.asrModelLabel = status.modelLabel;
+  session.asrSetupMessage = status.error;
+  session.modelReady = status.ready;
+}
+
 function setListening(listening: boolean): void {
   const next = !!listening;
   if (session.listening === next) {
@@ -638,8 +688,12 @@ function setListening(listening: boolean): void {
       micActive: false,
       systemActive: false,
     };
-    appendLog('info', 'Listening started — capturing microphone + system audio.');
+    appendLog(
+      'info',
+      `Listening started — ${getAsrBackend()}/${getAsrLanguage()} (compare=${isCompareMode()})`,
+    );
   } else {
+    bumpListenGeneration();
     session.listenStatus = 'idle';
     session.audio = {
       micLevel: 0,
@@ -647,7 +701,7 @@ function setListening(listening: boolean): void {
       micActive: false,
       systemActive: false,
     };
-    appendLog('info', 'Listening stopped — audio streams should be released.');
+    appendLog('info', 'Listening stopped — audio streams released; stale ASR discarded.');
   }
   broadcastSession();
 }
@@ -828,12 +882,23 @@ function registerIpc(): void {
 
   ipcMain.handle(
     'session:append-transcript',
-    (_e, line: { speaker: string; text: string; id?: string }) => {
+    (
+      _e,
+      line: {
+        speaker: string;
+        text: string;
+        id?: string;
+        language?: string | null;
+        backend?: AsrBackendId | null;
+        latencyMs?: number | null;
+      },
+    ) => {
       const text = String(line?.text ?? '').trim();
       if (!text) {
         return getPublicSession();
       }
       const speaker = String(line?.speaker ?? 'You');
+      const language = line?.language ? String(line.language) : null;
       // Drop matching provisional line when a final arrives.
       session.transcript = session.transcript.filter((t) => !t.id.startsWith('you-interim-'));
       session.transcript = [
@@ -842,8 +907,14 @@ function registerIpc(): void {
           id: line?.id || `t-${Date.now()}-${session.transcript.length}`,
           speaker,
           text,
+          language,
+          backend: line?.backend ?? getAsrBackend(),
+          latencyMs: line?.latencyMs ?? null,
         },
       ].slice(-200);
+      if (language) {
+        session.detectedLanguage = language;
+      }
       if (session.topic === 'Live conversation' || session.topic.startsWith('Waiting')) {
         session.topic = 'Live conversation';
       }
@@ -880,16 +951,54 @@ function registerIpc(): void {
   ipcMain.handle('listen:ensure-transcriber', async () => {
     try {
       await ensureTranscriber();
-      session.modelReady = true;
-      session.listenError = null;
+      syncAsrSessionFields();
+      session.listenError = session.asrSetupMessage;
       broadcastSession();
-      return { ready: true, error: null as string | null };
+      return {
+        ready: isTranscriberReady(),
+        error: getTranscriberError(),
+        status: getTranscriberStatus(),
+      };
     } catch (err) {
-      session.modelReady = false;
+      syncAsrSessionFields();
+      session.modelReady = isTranscriberReady();
       session.listenError = String(err);
       broadcastSession();
-      return { ready: false, error: String(err) };
+      return {
+        ready: session.modelReady,
+        error: String(err),
+        status: getTranscriberStatus(),
+      };
     }
+  });
+
+  ipcMain.handle('listen:get-asr-status', () => {
+    syncAsrSessionFields();
+    return getTranscriberStatus();
+  });
+
+  ipcMain.handle('listen:set-asr-backend', (_e, next: AsrBackendId) => {
+    setAsrBackend(next);
+    syncAsrSessionFields();
+    appendLog('info', `ASR backend set to ${session.asrBackend}`);
+    broadcastSession();
+    return getPublicSession();
+  });
+
+  ipcMain.handle('listen:set-asr-language', (_e, next: AsrLanguageId) => {
+    setAsrLanguage(next);
+    syncAsrSessionFields();
+    appendLog('info', `ASR language set to ${session.asrLanguage} (applies to next segments)`);
+    broadcastSession();
+    return getPublicSession();
+  });
+
+  ipcMain.handle('listen:set-compare-mode', (_e, enabled: boolean) => {
+    setCompareMode(!!enabled);
+    syncAsrSessionFields();
+    appendLog('info', `ASR compare mode ${session.asrCompareMode ? 'on' : 'off'}`);
+    broadcastSession();
+    return getPublicSession();
   });
 
   ipcMain.handle(
@@ -905,28 +1014,30 @@ function registerIpc(): void {
       }
       const sampleRate = Number(payload?.sampleRate) || 16000;
       if (!pcm.length) {
-        return '';
+        return emptyTranscriptResult();
       }
       try {
-        const text = await transcribePcm(pcm, sampleRate);
-        if (text) {
-          appendLog(
-            'info',
-            `Transcribed ${payload.source}: ${text.slice(0, 80)}${text.length > 80 ? '…' : ''}`,
-          );
+        const result = await transcribePcm(pcm, sampleRate);
+        logTranscriptResult(payload.source, result);
+        if (result.language) {
+          session.detectedLanguage = result.language;
         }
-        session.modelReady = isTranscriberReady();
-        if (session.listenError?.includes('timed out') || session.listenError?.includes('model')) {
+        syncAsrSessionFields();
+        if (
+          session.listenError?.includes('timed out') ||
+          session.listenError?.includes('model') ||
+          session.listenError?.includes('Downloading')
+        ) {
           session.listenError = null;
         }
         broadcastSession();
-        return text;
+        return result;
       } catch (err) {
         appendLog('error', `Transcribe failed (${payload.source}): ${String(err)}`);
         session.listenError = getTranscriberError() || String(err);
-        session.modelReady = isTranscriberReady();
+        syncAsrSessionFields();
         broadcastSession();
-        return '';
+        return emptyTranscriptResult();
       }
     },
   );
@@ -1126,18 +1237,27 @@ app.whenReady().then(() => {
   registerShortcuts();
   ensureOverlay();
   startElapsedTimer();
-  // Warm the tiny Whisper model in the background after UI is up.
+  onTranscriberStatus(() => {
+    syncAsrSessionFields();
+    broadcastSession();
+  });
+  syncAsrSessionFields();
+
+  // Warm the preferred local ASR backend after UI is up.
   setTimeout(() => {
-    void ensureTranscriber()
+    void warmTranscriber()
       .then(() => {
-        session.modelReady = true;
-        appendLog('info', 'Whisper base.en ready for streaming transcription.');
+        syncAsrSessionFields();
+        appendLog(
+          'info',
+          `${session.asrModelLabel} ready (language=${session.asrLanguage}).`,
+        );
         broadcastSession();
       })
       .catch((err) => {
-        session.modelReady = false;
+        syncAsrSessionFields();
         session.listenError = String(err);
-        appendLog('warn', `Whisper warmup failed: ${String(err)}`);
+        appendLog('warn', `ASR warmup failed: ${String(err)}`);
         broadcastSession();
       });
   }, 1500);

@@ -585,7 +585,7 @@ export class ListeningService implements OnDestroy {
           `[listen] flush ${capture.name} samples=${chunk.length} (~${(chunk.length / TARGET_RATE).toFixed(2)}s)`,
         );
         try {
-          const text = await api?.transcribePcm?.({
+          const raw = await api?.transcribePcm?.({
             source: capture.name,
             sampleRate: TARGET_RATE,
             pcm: Array.from(pcm),
@@ -593,15 +593,34 @@ export class ListeningService implements OnDestroy {
           if (generation !== capture.generation) {
             return;
           }
-          const cleaned = cleanupCaption(text ?? '');
-          if (!cleaned) {
-            console.info(`[listen] ${capture.name} empty/non-speech: ${text || '(blank)'}`);
+          const results = normalizeTranscriptResults(raw);
+          if (!results.length) {
+            console.info(`[listen] ${capture.name} empty/non-speech`);
             continue;
           }
-          await api?.appendTranscript?.({
-            speaker,
-            text: cleaned,
-          });
+          for (const item of results) {
+            const cleaned = cleanupCaption(item.text);
+            if (!cleaned) {
+              console.info(
+                `[listen] ${capture.name}/${item.backend} empty/non-speech: ${item.text || '(blank)'}`,
+              );
+              continue;
+            }
+            const label =
+              results.length > 1
+                ? `${speaker} · ${item.backend}${item.language ? ` · ${item.language}` : ''}`
+                : speaker;
+            await api?.appendTranscript?.({
+              speaker: label,
+              text:
+                results.length > 1 && item.latencyMs
+                  ? `${cleaned}  (${item.latencyMs}ms)`
+                  : cleaned,
+              language: item.language,
+              backend: item.backend,
+              latencyMs: item.latencyMs,
+            });
+          }
           if (capture.name === 'you') {
             this.silentMicWarned = true;
             await api?.reportListenStatus?.({
@@ -736,6 +755,55 @@ function speechRatio(pcm: Float32Array): number {
     }
   }
   return total ? speech / total : 0;
+}
+
+function normalizeTranscriptResults(
+  raw: unknown,
+): Array<{
+  text: string;
+  language: string | null;
+  latencyMs: number;
+  backend: 'qwen' | 'whisper';
+}> {
+  if (!raw) {
+    return [];
+  }
+  if (typeof raw === 'string') {
+    return raw.trim()
+      ? [{ text: raw, language: null, latencyMs: 0, backend: 'whisper' }]
+      : [];
+  }
+  if (typeof raw !== 'object') {
+    return [];
+  }
+  const result = raw as {
+    text?: string;
+    language?: string | null;
+    latencyMs?: number;
+    backend?: 'qwen' | 'whisper';
+    compare?: Array<{
+      text?: string;
+      language?: string | null;
+      latencyMs?: number;
+      backend?: 'qwen' | 'whisper';
+    }>;
+  };
+  if (Array.isArray(result.compare) && result.compare.length) {
+    return result.compare.map((item) => ({
+      text: String(item.text || ''),
+      language: item.language ? String(item.language) : null,
+      latencyMs: Number(item.latencyMs) || 0,
+      backend: item.backend === 'qwen' ? 'qwen' : 'whisper',
+    }));
+  }
+  return [
+    {
+      text: String(result.text || ''),
+      language: result.language ? String(result.language) : null,
+      latencyMs: Number(result.latencyMs) || 0,
+      backend: result.backend === 'qwen' ? 'qwen' : 'whisper',
+    },
+  ];
 }
 
 function cleanupCaption(text: string): string {

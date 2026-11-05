@@ -85,7 +85,26 @@
           </li>
           <li>
             <span>Speech model</span>
-            <strong>{{ snap.session.modelReady ? 'Ready (Whisper base.en)' : 'Loading / unavailable' }}</strong>
+            <strong>
+              {{ snap.session.modelReady ? 'Ready' : 'Loading / unavailable' }}
+              — {{ snap.session.asrModelLabel || 'n/a' }}
+            </strong>
+          </li>
+          <li>
+            <span>ASR backend / language</span>
+            <strong>
+              {{ snap.session.asrBackend }} / {{ snap.session.asrLanguage }}
+              @if (snap.session.detectedLanguage) {
+                (detected {{ snap.session.detectedLanguage }})
+              }
+              @if (snap.session.asrCompareMode) {
+                · compare on
+              }
+            </strong>
+          </li>
+          <li>
+            <span>ASR setup</span>
+            <strong>{{ snap.session.asrSetupMessage || 'OK' }}</strong>
           </li>
           <li>
             <span>Listen error</span>

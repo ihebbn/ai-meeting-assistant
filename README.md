@@ -1,11 +1,11 @@
 # Windows Meeting Copilot — Milestone 1
 
-One protected, movable, resizable frosted-glass overlay for Google Meet and Microsoft Teams. Live dual-source transcription (microphone + Windows system audio). Ask AI still uses sample answers until dual-source capture is verified with headphones in a real call.
+One protected, movable, resizable frosted-glass overlay for Google Meet and Microsoft Teams. Live dual-source transcription (microphone + Windows system audio) with local ASR. Ask AI still uses sample answers until dual-source capture is verified with headphones in a real call.
 
 ## Unified overlay
 
 - **Toolbar** — dedicated drag grip moves the whole overlay; Listen/Stop, waveform, **You / Sys activity**, timer, Ask AI, **Insights** / **AI** reopen chips, Hide
-- **Live Insights** — own collapse control; transcript toggle; live **You** / **System audio** lines; sample recap + actions
+- **Live Insights** — own collapse control; transcript toggle; live **You** / **System audio** lines; ASR backend + language controls; sample recap + actions
 - **AI Response** — own collapse control; streaming sample answer; Copy; follow-up input
 
 ### Listen
@@ -13,10 +13,53 @@ One protected, movable, resizable frosted-glass overlay for Google Meet and Micr
 | Control | Behavior |
 | --- | --- |
 | Listen | Starts microphone + Windows system-audio loopback; streams speech into the transcript |
-| Stop | Releases both audio streams and clears activity meters |
+| Stop | Releases both audio streams, clears activity meters, and discards in-flight ASR results |
 | Hide / collapse | Does **not** stop listening — capture keeps running while the toolbar stays up |
 
 Transcript speakers are labeled **You** (mic) and **System audio** (loopback). Wear headphones so meeting audio is not echoed into the mic.
+
+### Local transcription backends
+
+| Backend | Engine | Notes |
+| --- | --- | --- |
+| **Qwen3-ASR 0.6B INT8** | `sherpa-onnx` (WASM) in a forked Node worker | Multilingual; intended default after Windows acceptance |
+| **Whisper base** | `@xenova/transformers` | Kept for side-by-side testing (`base.en` when language=English, multilingual `base` otherwise) |
+
+**Language** defaults to **Auto**. In Auto mode the language hint is left unset and each speech segment is detected independently. Change language mid-session from Live Insights — no restart. Detected language is shown when the backend exposes it.
+
+**Compare** runs Qwen and Whisper on the same utterance and appends both lines with latency (ms).
+
+Recognition runs off the overlay UI thread (Qwen worker process; Whisper promise queue on the main process). Voice-activity detection flushes finished phrases into Show Transcript.
+
+#### Qwen model setup (one-time, ~1 GB)
+
+On first Listen with the Qwen backend selected, the app downloads:
+
+`sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25`
+
+into `%APPDATA%/meeting-copilot/asr-models/` (Electron `userData`). Progress and errors appear in Live Insights. Manual fallback:
+
+```powershell
+cd $env:APPDATA\meeting-copilot\asr-models
+curl.exe -L -o sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2 https://github.com/k2-fsa/sherpa-onnx/releases/download/asr-models/sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2
+tar -xjf sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25.tar.bz2
+```
+
+Required files: `conv_frontend.onnx`, `encoder.int8.onnx`, `decoder.int8.onnx`, `tokenizer/`.
+
+If Qwen init fails before acceptance is marked Pass, Listen falls back to Whisper automatically.
+
+#### Switching backends
+
+In **Live Insights → Show transcript**:
+
+1. **Backend** — Qwen3-ASR or Whisper (takes effect on the next flushed phrase; Listen can stay running)
+2. **Language** — Auto / English / French / Arabic
+3. **Compare** — checkbox for dual-backend output on each phrase
+
+Whisper first-run may download model weights into `%APPDATA%/meeting-copilot/model-cache/`.
+
+**Default policy:** Qwen is the intended default once the Windows acceptance matrix in [`VERIFICATION.md`](VERIFICATION.md) is marked Pass. Until then, Whisper stays warm if Qwen model files are not ready; select Qwen in Live Insights to download and test.
 
 ### Collapse / expand
 
@@ -47,8 +90,6 @@ npm start
 
 Dev: `npm run dev` · Package: `npm run package:win`
 
-First Listen may download the local Whisper `base.en` model into the app userData cache.
-
 ## Shortcuts
 
 | Action | Shortcut |
@@ -59,4 +100,4 @@ First Listen may download the local Whisper `base.en` model into the app userDat
 
 ## Remote verification
 
-From a second participant in Meet/Teams, confirm the overlay stays invisible while you **drag**, **resize**, **collapse**, and **reopen** panels. Record results in [`VERIFICATION.md`](VERIFICATION.md), including the dual-audio headphones checklist before wiring Ask AI to the live transcript.
+From a second participant in Meet/Teams, confirm the overlay stays invisible while you **drag**, **resize**, **collapse**, and **reopen** panels. Record dual-audio + multilingual ASR results in [`VERIFICATION.md`](VERIFICATION.md) before wiring Ask AI to the live transcript.

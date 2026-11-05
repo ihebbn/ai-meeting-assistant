@@ -4,10 +4,16 @@ export type InsightAction = {
   icon: 'book' | 'globe' | 'chat' | 'sparkle' | 'reply';
 };
 
+export type AsrBackendId = 'qwen' | 'whisper';
+export type AsrLanguageId = 'auto' | 'en' | 'fr' | 'ar';
+
 export type TranscriptLine = {
   id: string;
   speaker: string;
   text: string;
+  language?: string | null;
+  backend?: AsrBackendId | null;
+  latencyMs?: number | null;
 };
 
 export type AiMessage = {
@@ -54,6 +60,12 @@ export type SessionState = {
   listenStatus: ListenStatus;
   listenError: string | null;
   modelReady: boolean;
+  asrBackend: AsrBackendId;
+  asrLanguage: AsrLanguageId;
+  asrCompareMode: boolean;
+  detectedLanguage: string | null;
+  asrModelLabel: string;
+  asrSetupMessage: string | null;
 };
 
 export const ASK_ACCELERATOR = 'CommandOrControl+Return';
@@ -86,8 +98,8 @@ export function createInitialSession(): SessionState {
     topic: 'Live conversation',
     recap: [
       'Press Listen to capture your microphone (You) and Windows system audio.',
-      'Use headphones so system audio is not re-captured by the mic.',
-      'Ask AI stays on sample answers until dual-source capture is verified.',
+      'Language defaults to Auto — English, French, and Arabic segments are detected per phrase.',
+      'Switch Qwen / Whisper in Live Insights for side-by-side testing. Ask AI stays sample-only until dual-source capture is verified.',
     ],
     actions: [
       { id: 'define', label: 'Define startup acquisition', icon: 'book' },
@@ -113,6 +125,12 @@ export function createInitialSession(): SessionState {
     listenStatus: 'idle',
     listenError: null,
     modelReady: false,
+    asrBackend: 'whisper',
+    asrLanguage: 'auto',
+    asrCompareMode: false,
+    detectedLanguage: null,
+    asrModelLabel: 'Whisper base',
+    asrSetupMessage: null,
   };
 }
 

@@ -7,7 +7,7 @@ import {
   inject,
   viewChild,
 } from '@angular/core';
-import { getApi } from '../electron-api';
+import { AsrBackendId, AsrLanguageId, getApi } from '../electron-api';
 import { SessionService } from '../session.service';
 
 @Component({
@@ -57,6 +57,21 @@ export class InsightsComponent implements OnInit {
 
   openMicSettings(): void {
     void getApi()?.openMicSettings?.();
+  }
+
+  onBackendChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value as AsrBackendId;
+    void getApi()?.setAsrBackend?.(value);
+  }
+
+  onLanguageChange(event: Event): void {
+    const value = (event.target as HTMLSelectElement).value as AsrLanguageId;
+    void getApi()?.setAsrLanguage?.(value);
+  }
+
+  onCompareChange(event: Event): void {
+    const enabled = (event.target as HTMLInputElement).checked;
+    void getApi()?.setCompareMode?.(enabled);
   }
 
   collapse(): void {
