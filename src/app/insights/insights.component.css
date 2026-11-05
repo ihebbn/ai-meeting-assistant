@@ -187,6 +187,31 @@ h3 {
   text-shadow: 0 1px 2px rgba(0, 0, 0, 0.35);
 }
 
+.transcript .empty,
+.transcript .listen-error {
+  color: var(--text-secondary);
+  font-size: 0.84rem;
+}
+
+.transcript .listen-error {
+  color: #fca5a5;
+}
+
+.transcript .mic-fix {
+  justify-self: start;
+  margin-top: 4px;
+  color: #93c5fd;
+}
+
+.transcript .empty strong {
+  display: inline;
+  margin: 0;
+  color: #93c5fd;
+  font-size: inherit;
+  letter-spacing: normal;
+  text-transform: none;
+}
+
 .transcript strong {
   display: block;
   margin-bottom: 2px;
@@ -194,4 +219,8 @@ h3 {
   font-size: 0.75rem;
   letter-spacing: 0.03em;
   text-transform: uppercase;
+}
+
+.transcript p[data-speaker='System audio'] strong {
+  color: #86efac;
 }

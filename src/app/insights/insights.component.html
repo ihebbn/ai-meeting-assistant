@@ -29,11 +29,28 @@
       </div>
     </header>
 
-    <div class="body">
+    <div class="body" #scrollBody (scroll)="onTranscriptScroll($event)">
       @if (showTranscript()) {
         <div class="transcript">
+          @if (snap.listenError) {
+            <p class="listen-error">{{ snap.listenError }}</p>
+            @if (isMicError(snap.listenError)) {
+              <button type="button" class="text-btn mic-fix" (click)="openMicSettings()">
+                Open Windows mic settings
+              </button>
+            }
+          }
+          @if (!snap.transcript.length) {
+            <p class="empty">
+              @if (snap.listening) {
+                Listening for <strong>You</strong> and <strong>System audio</strong>…
+              } @else {
+                Transcript is empty. Press Listen on the toolbar to start capturing.
+              }
+            </p>
+          }
           @for (line of snap.transcript; track line.id) {
-            <p>
+            <p [attr.data-speaker]="line.speaker">
               <strong>{{ line.speaker }}</strong>
               {{ line.text }}
             </p>

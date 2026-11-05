@@ -22,6 +22,15 @@ export type OverlaySize = {
   height: number;
 };
 
+export type AudioActivity = {
+  micLevel: number;
+  systemLevel: number;
+  micActive: boolean;
+  systemActive: boolean;
+};
+
+export type ListenStatus = 'idle' | 'starting' | 'listening' | 'error';
+
 export type SessionView = {
   listening: boolean;
   elapsedSeconds: number;
@@ -44,6 +53,10 @@ export type SessionView = {
   followUpDraft: string;
   askShortcutLabel: string;
   hideShortcutLabel: string;
+  audio: AudioActivity;
+  listenStatus: ListenStatus;
+  listenError: string | null;
+  modelReady: boolean;
 };
 
 export type ProtectionState = {
@@ -83,6 +96,7 @@ export type MeetingCopilotApi = {
   getSession: () => Promise<SessionView>;
   onSessionUpdated?: (callback: (session: SessionView) => void) => () => void;
   toggleListen?: () => Promise<SessionView>;
+  setListening?: (listening: boolean) => Promise<SessionView>;
   hideAll?: () => Promise<SessionView>;
   toggleHidden?: () => Promise<SessionView>;
   toggleMenu?: (anchor: {
@@ -104,8 +118,34 @@ export type MeetingCopilotApi = {
   copyText?: (text: string) => Promise<boolean>;
   quit: () => Promise<void>;
   openDiagnostics?: () => Promise<boolean>;
+  openMicSettings?: () => Promise<boolean>;
   openLogFolder?: () => Promise<string>;
   onLog?: (callback: (entry: LogEntry) => void) => () => void;
+  enableLoopbackAudio?: () => Promise<void>;
+  disableLoopbackAudio?: () => Promise<void>;
+  reportAudioActivity?: (activity: AudioActivity) => Promise<SessionView>;
+  reportListenStatus?: (payload: {
+    status: ListenStatus;
+    error: string | null;
+    modelReady: boolean;
+  }) => Promise<SessionView>;
+  appendTranscript?: (line: {
+    speaker: string;
+    text: string;
+    id?: string;
+  }) => Promise<SessionView>;
+  upsertTranscript?: (line: {
+    id: string;
+    speaker: string;
+    text: string;
+    provisional?: boolean;
+  }) => Promise<SessionView>;
+  ensureTranscriber?: () => Promise<{ ready: boolean; error: string | null }>;
+  transcribePcm?: (payload: {
+    source: 'you' | 'system';
+    sampleRate: number;
+    pcm: number[];
+  }) => Promise<string>;
 };
 
 declare global {

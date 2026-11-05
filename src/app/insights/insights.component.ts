@@ -1,4 +1,12 @@
-import { Component, OnInit, computed, inject } from '@angular/core';
+import {
+  Component,
+  ElementRef,
+  OnInit,
+  afterRenderEffect,
+  computed,
+  inject,
+  viewChild,
+} from '@angular/core';
 import { getApi } from '../electron-api';
 import { SessionService } from '../session.service';
 
@@ -10,19 +18,53 @@ import { SessionService } from '../session.service';
 })
 export class InsightsComponent implements OnInit {
   private readonly sessions = inject(SessionService);
+  private readonly scrollBody = viewChild<ElementRef<HTMLDivElement>>('scrollBody');
   readonly session = this.sessions.session;
   readonly showTranscript = computed(() => this.session()?.showTranscript ?? false);
+
+  /** When true, new transcript lines keep the panel pinned to the latest speech. */
+  private followTalk = true;
+
+  constructor() {
+    afterRenderEffect(() => {
+      const show = this.showTranscript();
+      const count = this.session()?.transcript.length ?? 0;
+      const el = this.scrollBody()?.nativeElement;
+      if (!show || !el || count === 0 || !this.followTalk) {
+        return;
+      }
+      el.scrollTop = el.scrollHeight;
+    });
+  }
 
   ngOnInit(): void {
     void this.sessions.init();
   }
 
+  onTranscriptScroll(event: Event): void {
+    if (!this.showTranscript()) {
+      return;
+    }
+    const el = event.target as HTMLElement;
+    const distanceFromBottom = el.scrollHeight - el.scrollTop - el.clientHeight;
+    this.followTalk = distanceFromBottom < 56;
+  }
+
   toggleTranscript(): void {
+    this.followTalk = true;
     void getApi()?.toggleTranscript?.();
+  }
+
+  openMicSettings(): void {
+    void getApi()?.openMicSettings?.();
   }
 
   collapse(): void {
     void getApi()?.setPanelOpen?.('insights', false);
+  }
+
+  isMicError(message: string | null | undefined): boolean {
+    return !!message && /microphone|mic /i.test(message);
   }
 
   runAction(id: string): void {

@@ -17,6 +17,10 @@ export class ToolbarComponent implements OnInit {
     formatElapsed(this.session()?.elapsedSeconds ?? 0),
   );
   readonly listening = computed(() => this.session()?.listening ?? false);
+  readonly micLevel = computed(() => this.session()?.audio?.micLevel ?? 0);
+  readonly systemLevel = computed(() => this.session()?.audio?.systemLevel ?? 0);
+  readonly micActive = computed(() => this.session()?.audio?.micActive ?? false);
+  readonly systemActive = computed(() => this.session()?.audio?.systemActive ?? false);
   readonly insightsOpen = computed(() => this.session()?.insightsVisible ?? false);
   readonly responseOpen = computed(() => this.session()?.responseVisible ?? false);
   readonly panelsHidden = computed(() => this.session()?.panelsHidden ?? false);

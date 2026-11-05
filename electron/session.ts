@@ -22,6 +22,15 @@ export type OverlaySize = {
   height: number;
 };
 
+export type AudioActivity = {
+  micLevel: number;
+  systemLevel: number;
+  micActive: boolean;
+  systemActive: boolean;
+};
+
+export type ListenStatus = 'idle' | 'starting' | 'listening' | 'error';
+
 export type SessionState = {
   listening: boolean;
   elapsedSeconds: number;
@@ -41,13 +50,17 @@ export type SessionState = {
   currentQuestion: string;
   messages: AiMessage[];
   followUpDraft: string;
+  audio: AudioActivity;
+  listenStatus: ListenStatus;
+  listenError: string | null;
+  modelReady: boolean;
 };
 
 export const ASK_ACCELERATOR = 'CommandOrControl+Return';
 export const HIDE_ACCELERATOR = 'CommandOrControl+\\';
 
 export const TOOLBAR_HEIGHT = 56;
-export const TOOLBAR_WIDTH = 640;
+export const TOOLBAR_WIDTH = 720;
 /** Padding around panels only; toolbar-only mode uses zero pad for a clean pill edge. */
 export const SHELL_PAD = 8;
 export const TOOLBAR_ONLY_PAD = 0;
@@ -59,21 +72,22 @@ export const DEFAULT_PANEL_HEIGHT = 440;
 
 export function createInitialSession(): SessionState {
   return {
-    listening: true,
-    elapsedSeconds: 20,
+    listening: false,
+    elapsedSeconds: 0,
     panelsHidden: false,
     menuOpen: false,
     insightsOpen: true,
     responseOpen: false,
-    showTranscript: false,
+    showTranscript: true,
     panelSize: {
       width: DEFAULT_PANEL_WIDTH,
       height: DEFAULT_PANEL_HEIGHT,
     },
-    topic: 'Discussion about news',
+    topic: 'Live conversation',
     recap: [
-      "You started talking about how there's a lot of big startup acquisitions happening.",
-      'Neel asked you about who recently acquired Windsurf.',
+      'Press Listen to capture your microphone (You) and Windows system audio.',
+      'Use headphones so system audio is not re-captured by the mic.',
+      'Ask AI stays on sample answers until dual-source capture is verified.',
     ],
     actions: [
       { id: 'define', label: 'Define startup acquisition', icon: 'book' },
@@ -86,26 +100,19 @@ export function createInitialSession(): SessionState {
       { id: 'helpful', label: 'Give me helpful information', icon: 'sparkle' },
       { id: 'reply', label: 'Suggest a reply', icon: 'reply' },
     ],
-    transcript: [
-      {
-        id: 't1',
-        speaker: 'You',
-        text: "There's been a wave of big startup acquisitions lately — feels like every week another AI tool gets scooped up.",
-      },
-      {
-        id: 't2',
-        speaker: 'Neel',
-        text: 'True. Do you know who recently acquired Windsurf?',
-      },
-      {
-        id: 't3',
-        speaker: 'You',
-        text: "I want to say it was one of the coding-agent companies, but I'm blanking on the details.",
-      },
-    ],
+    transcript: [],
     currentQuestion: '',
     messages: [],
     followUpDraft: '',
+    audio: {
+      micLevel: 0,
+      systemLevel: 0,
+      micActive: false,
+      systemActive: false,
+    },
+    listenStatus: 'idle',
+    listenError: null,
+    modelReady: false,
   };
 }
 
@@ -121,7 +128,7 @@ const SAMPLE_ANSWERS: Record<string, string> = {
   reply:
     'Suggested reply: “Cognition acquired Windsurf in July 2025 to fold its agentic IDE and team into Devin — it looks like a capability + talent deal, not just a brand buy.”',
   default:
-    'Based on the recent discussion, focus on the Windsurf acquisition details and ask Neel whether they care more about product integration or market consolidation.',
+    'Ask AI is still on sample answers. Verify microphone + system-audio transcription with headphones in a real call before wiring answers to the live transcript.',
 };
 
 export function answerForPrompt(prompt: string, actionId?: string): string {

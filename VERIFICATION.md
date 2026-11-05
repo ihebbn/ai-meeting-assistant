@@ -14,6 +14,19 @@
 | Observer (remote) | — |
 | Notes | Repeat remote checks while dragging, resizing, collapsing, reopening |
 
+## Dual-audio transcription (headphones required)
+
+Do this in a real Meet/Teams call **before** connecting Ask AI to the live transcript.
+
+| Check | Result |
+| --- | --- |
+| Headphones on (speakers off) to avoid mic echo | Pending (operator) |
+| Listen starts mic + system audio without stopping on Hide/collapse | Pass (local 2026-11-05 — hide while listening kept capture; Stop released streams) |
+| Speak → **You** activity meter moves and transcript line labeled You | Pending (operator — speak with headphones in a call) |
+| Remote participant / call audio → **Sys** meter moves and line labeled System audio | Pass (local 2026-11-05 — loopback transcribed system playback, e.g. “And Ally has been slain.”) |
+| Stop releases both streams (meters idle; tracks ended) | Pass (local 2026-11-05) |
+| Ask AI still sample-only (not yet wired to transcript) | Pass |
+
 ## Local interaction checks
 
 | Check | Result |

@@ -11,6 +11,8 @@ contextBridge.exposeInMainWorld('meetingCopilot', {
     return () => ipcRenderer.removeListener('session:updated', listener);
   },
   toggleListen: () => ipcRenderer.invoke('session:toggle-listen'),
+  setListening: (listening: boolean) =>
+    ipcRenderer.invoke('session:set-listening', listening),
   hideAll: () => ipcRenderer.invoke('session:hide-all'),
   toggleHidden: () => ipcRenderer.invoke('session:toggle-hidden'),
   toggleMenu: (anchor: unknown) => ipcRenderer.invoke('overlay:toggle-menu', anchor),
@@ -31,4 +33,17 @@ contextBridge.exposeInMainWorld('meetingCopilot', {
   copyText: (text: string) => ipcRenderer.invoke('app:copy-text', text),
   quit: () => ipcRenderer.invoke('app:quit'),
   openDiagnostics: () => ipcRenderer.invoke('app:open-diagnostics'),
+  openMicSettings: () => ipcRenderer.invoke('app:open-mic-settings'),
+  enableLoopbackAudio: () => ipcRenderer.invoke('enable-loopback-audio'),
+  disableLoopbackAudio: () => ipcRenderer.invoke('disable-loopback-audio'),
+  reportAudioActivity: (activity: unknown) =>
+    ipcRenderer.invoke('session:report-audio-activity', activity),
+  reportListenStatus: (payload: unknown) =>
+    ipcRenderer.invoke('session:report-listen-status', payload),
+  appendTranscript: (line: unknown) =>
+    ipcRenderer.invoke('session:append-transcript', line),
+  upsertTranscript: (line: unknown) =>
+    ipcRenderer.invoke('session:upsert-transcript', line),
+  ensureTranscriber: () => ipcRenderer.invoke('listen:ensure-transcriber'),
+  transcribePcm: (payload: unknown) => ipcRenderer.invoke('listen:transcribe-pcm', payload),
 });

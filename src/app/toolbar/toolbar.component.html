@@ -29,6 +29,17 @@
     <span></span><span></span><span></span><span></span><span></span>
   </div>
 
+  <div class="sources" [class.on]="listening()" aria-label="Audio source activity">
+    <div class="src" [class.live]="micActive()" title="Microphone">
+      <span>You</span>
+      <i [style.transform]="'scaleY(' + (0.15 + micLevel() * 0.85) + ')'"></i>
+    </div>
+    <div class="src" [class.live]="systemActive()" title="System audio">
+      <span>Sys</span>
+      <i [style.transform]="'scaleY(' + (0.15 + systemLevel() * 0.85) + ')'"></i>
+    </div>
+  </div>
+
   <div class="timer">{{ elapsed() }}</div>
 
   <div class="divider" aria-hidden="true"></div>

@@ -59,7 +59,38 @@
       <article>
         <h2>Unified overlay session</h2>
         <ul>
-          <li><span>Listening</span><strong>{{ snap.session.listening ? 'Yes (sample)' : 'Paused' }}</strong></li>
+          <li>
+            <span>Listening</span>
+            <strong>
+              {{
+                snap.session.listening
+                  ? 'Yes — mic + system audio'
+                  : 'Stopped (streams released)'
+              }}
+            </strong>
+          </li>
+          <li>
+            <span>Mic activity</span>
+            <strong>
+              {{ snap.session.audio.micActive ? 'Active' : 'Quiet' }}
+              ({{ snap.session.audio.micLevel | number: '1.0-2' }})
+            </strong>
+          </li>
+          <li>
+            <span>System audio</span>
+            <strong>
+              {{ snap.session.audio.systemActive ? 'Active' : 'Quiet' }}
+              ({{ snap.session.audio.systemLevel | number: '1.0-2' }})
+            </strong>
+          </li>
+          <li>
+            <span>Speech model</span>
+            <strong>{{ snap.session.modelReady ? 'Ready (Whisper base.en)' : 'Loading / unavailable' }}</strong>
+          </li>
+          <li>
+            <span>Listen error</span>
+            <strong>{{ snap.session.listenError || 'None' }}</strong>
+          </li>
           <li><span>Panels hidden</span><strong>{{ snap.session.panelsHidden ? 'Yes (toolbar only)' : 'No' }}</strong></li>
           <li><span>Insights open</span><strong>{{ snap.session.insightsVisible ? 'Yes' : 'Collapsed' }}</strong></li>
           <li><span>AI response open</span><strong>{{ snap.session.responseVisible ? 'Yes' : 'Collapsed' }}</strong></li>

@@ -1,4 +1,5 @@
 import { Component, HostListener, OnInit, computed, inject } from '@angular/core';
+import { ListeningService } from '../audio/listening.service';
 import { getApi } from '../electron-api';
 import { InsightsComponent } from '../insights/insights.component';
 import { ResponseComponent } from '../response/response.component';
@@ -17,6 +18,8 @@ import { ToolbarComponent } from '../toolbar/toolbar.component';
 })
 export class OverlayShellComponent implements OnInit {
   private readonly sessions = inject(SessionService);
+  /** Keeps mic + system capture alive across panel collapse / hide. */
+  private readonly listening = inject(ListeningService);
   readonly session = this.sessions.session;
   readonly insightsOpen = computed(() => this.session()?.insightsVisible ?? false);
   readonly responseOpen = computed(() => this.session()?.responseVisible ?? false);
@@ -31,6 +34,8 @@ export class OverlayShellComponent implements OnInit {
 
   ngOnInit(): void {
     void this.sessions.init();
+    // Ensure the root-provided capture service stays alive with the overlay shell.
+    void this.listening;
     this.keepDocumentTransparent();
   }
 

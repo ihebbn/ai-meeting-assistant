@@ -42,6 +42,7 @@
 
 .listen,
 .wave,
+.sources,
 .timer,
 .action,
 .chip,
@@ -114,6 +115,63 @@
 @keyframes pulse {
   0%, 100% { transform: scaleY(0.55); opacity: 0.65; }
   50% { transform: scaleY(1); opacity: 1; }
+}
+
+.sources {
+  display: flex;
+  align-items: flex-end;
+  gap: 6px;
+  min-width: 72px;
+  opacity: 0.4;
+  transition: opacity 120ms ease;
+}
+
+.sources.on {
+  opacity: 1;
+}
+
+.src {
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  min-width: 28px;
+}
+
+.src span {
+  font-size: 0.58rem;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  color: rgba(255, 255, 255, 0.55);
+}
+
+.src i {
+  display: block;
+  width: 4px;
+  height: 14px;
+  border-radius: 2px;
+  background: rgba(147, 197, 253, 0.55);
+  transform-origin: bottom center;
+  transition: transform 80ms linear, background-color 120ms ease;
+}
+
+.src.live span {
+  color: #bfdbfe;
+}
+
+.src.live i {
+  background: #93c5fd;
+}
+
+.src:last-child i {
+  background: rgba(134, 239, 172, 0.5);
+}
+
+.src:last-child.live span {
+  color: #bbf7d0;
+}
+
+.src:last-child.live i {
+  background: #86efac;
 }
 
 .timer {

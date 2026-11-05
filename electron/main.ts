@@ -5,8 +5,10 @@ import {
   globalShortcut,
   ipcMain,
   screen,
+  session as electronSession,
   shell,
 } from 'electron';
+import { initMain as initAudioLoopback } from 'electron-audio-loopback';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
@@ -18,6 +20,8 @@ import {
   PANEL_GAP,
   SHELL_PAD,
   TOOLBAR_ONLY_PAD,
+  AudioActivity,
+  ListenStatus,
   SessionState,
   TOOLBAR_HEIGHT,
   TOOLBAR_WIDTH,
@@ -26,6 +30,12 @@ import {
   clampPanelSize,
   createInitialSession,
 } from './session';
+import {
+  ensureTranscriber,
+  getTranscriberError,
+  isTranscriberReady,
+  transcribePcm,
+} from './transcriber';
 
 const isDev = process.env['ELECTRON_DEV'] === '1';
 const OVERLAY_BG = '#00000000';
@@ -37,6 +47,9 @@ const CONTENT_PROTECTION_ENABLED = false;
 if (process.platform === 'win32') {
   app.commandLine.appendSwitch('enable-transparent-visuals');
 }
+
+// Must run before ready so Chromium loopback feature flags apply.
+initAudioLoopback();
 
 type ProtectionState = {
   requested: boolean;
@@ -602,6 +615,43 @@ function ensureDiagnostics(): BrowserWindow {
   return diagnosticsWindow;
 }
 
+function clamp01(value: number): number {
+  if (!Number.isFinite(value)) {
+    return 0;
+  }
+  return Math.max(0, Math.min(1, value));
+}
+
+function setListening(listening: boolean): void {
+  const next = !!listening;
+  if (session.listening === next) {
+    broadcastSession();
+    return;
+  }
+  session.listening = next;
+  if (next) {
+    session.listenStatus = 'starting';
+    session.listenError = null;
+    session.audio = {
+      micLevel: 0,
+      systemLevel: 0,
+      micActive: false,
+      systemActive: false,
+    };
+    appendLog('info', 'Listening started — capturing microphone + system audio.');
+  } else {
+    session.listenStatus = 'idle';
+    session.audio = {
+      micLevel: 0,
+      systemLevel: 0,
+      micActive: false,
+      systemActive: false,
+    };
+    appendLog('info', 'Listening stopped — audio streams should be released.');
+  }
+  broadcastSession();
+}
+
 function startElapsedTimer(): void {
   stopElapsedTimer();
   elapsedTimer = setInterval(() => {
@@ -739,14 +789,147 @@ function registerIpc(): void {
   ipcMain.handle('session:get', () => getPublicSession());
 
   ipcMain.handle('session:toggle-listen', () => {
-    session.listening = !session.listening;
-    appendLog(
-      'info',
-      session.listening ? 'Listening resumed (sample).' : 'Listening paused (sample).',
-    );
+    setListening(!session.listening);
+    return getPublicSession();
+  });
+
+  ipcMain.handle('session:set-listening', (_e, listening: boolean) => {
+    setListening(!!listening);
+    return getPublicSession();
+  });
+
+  ipcMain.handle('session:report-audio-activity', (_e, activity: AudioActivity) => {
+    session.audio = {
+      micLevel: clamp01(Number(activity?.micLevel) || 0),
+      systemLevel: clamp01(Number(activity?.systemLevel) || 0),
+      micActive: !!activity?.micActive,
+      systemActive: !!activity?.systemActive,
+    };
     broadcastSession();
     return getPublicSession();
   });
+
+  ipcMain.handle(
+    'session:report-listen-status',
+    (
+      _e,
+      payload: { status: ListenStatus; error: string | null; modelReady: boolean },
+    ) => {
+      session.listenStatus = payload?.status ?? session.listenStatus;
+      session.listenError = payload?.error ? String(payload.error) : null;
+      session.modelReady = !!payload?.modelReady || isTranscriberReady();
+      if (session.listenError) {
+        appendLog('warn', `Listen status: ${session.listenStatus} — ${session.listenError}`);
+      }
+      broadcastSession();
+      return getPublicSession();
+    },
+  );
+
+  ipcMain.handle(
+    'session:append-transcript',
+    (_e, line: { speaker: string; text: string; id?: string }) => {
+      const text = String(line?.text ?? '').trim();
+      if (!text) {
+        return getPublicSession();
+      }
+      const speaker = String(line?.speaker ?? 'You');
+      // Drop matching provisional line when a final arrives.
+      session.transcript = session.transcript.filter((t) => !t.id.startsWith('you-interim-'));
+      session.transcript = [
+        ...session.transcript,
+        {
+          id: line?.id || `t-${Date.now()}-${session.transcript.length}`,
+          speaker,
+          text,
+        },
+      ].slice(-200);
+      if (session.topic === 'Live conversation' || session.topic.startsWith('Waiting')) {
+        session.topic = 'Live conversation';
+      }
+      broadcastSession();
+      return getPublicSession();
+    },
+  );
+
+  ipcMain.handle(
+    'session:upsert-transcript',
+    (
+      _e,
+      line: { id: string; speaker: string; text: string; provisional?: boolean },
+    ) => {
+      const text = String(line?.text ?? '').trim();
+      const id = String(line?.id ?? '');
+      if (!text || !id) {
+        return getPublicSession();
+      }
+      const speaker = String(line?.speaker ?? 'You');
+      const existing = session.transcript.findIndex((t) => t.id === id);
+      if (existing >= 0) {
+        session.transcript = session.transcript.map((t, index) =>
+          index === existing ? { ...t, speaker, text } : t,
+        );
+      } else {
+        session.transcript = [...session.transcript, { id, speaker, text }].slice(-200);
+      }
+      broadcastSession();
+      return getPublicSession();
+    },
+  );
+
+  ipcMain.handle('listen:ensure-transcriber', async () => {
+    try {
+      await ensureTranscriber();
+      session.modelReady = true;
+      session.listenError = null;
+      broadcastSession();
+      return { ready: true, error: null as string | null };
+    } catch (err) {
+      session.modelReady = false;
+      session.listenError = String(err);
+      broadcastSession();
+      return { ready: false, error: String(err) };
+    }
+  });
+
+  ipcMain.handle(
+    'listen:transcribe-pcm',
+    async (
+      _e,
+      payload: { source: 'you' | 'system'; sampleRate: number; pcm: number[] },
+    ) => {
+      const values = payload?.pcm ?? [];
+      const pcm = new Float32Array(values.length);
+      for (let i = 0; i < values.length; i += 1) {
+        pcm[i] = Number(values[i]) || 0;
+      }
+      const sampleRate = Number(payload?.sampleRate) || 16000;
+      if (!pcm.length) {
+        return '';
+      }
+      try {
+        const text = await transcribePcm(pcm, sampleRate);
+        if (text) {
+          appendLog(
+            'info',
+            `Transcribed ${payload.source}: ${text.slice(0, 80)}${text.length > 80 ? '…' : ''}`,
+          );
+        }
+        session.modelReady = isTranscriberReady();
+        if (session.listenError?.includes('timed out') || session.listenError?.includes('model')) {
+          session.listenError = null;
+        }
+        broadcastSession();
+        return text;
+      } catch (err) {
+        appendLog('error', `Transcribe failed (${payload.source}): ${String(err)}`);
+        session.listenError = getTranscriberError() || String(err);
+        session.modelReady = isTranscriberReady();
+        broadcastSession();
+        return '';
+      }
+    },
+  );
 
   ipcMain.handle('session:hide-all', () => {
     togglePanelsHidden();
@@ -858,6 +1041,14 @@ function registerIpc(): void {
     return true;
   });
 
+  ipcMain.handle('app:open-mic-settings', async () => {
+    // Windows deep-links for the two places that usually cause silent getUserMedia.
+    await shell.openExternal('ms-settings:privacy-microphone');
+    await shell.openExternal('ms-settings:sound');
+    appendLog('info', 'Opened Windows microphone privacy + sound settings.');
+    return true;
+  });
+
   ipcMain.handle('app:open-log-folder', async () => {
     if (logFilePath) {
       await shell.showItemInFolder(logFilePath);
@@ -907,10 +1098,49 @@ app.whenReady().then(() => {
     `Default panel size ${DEFAULT_PANEL_WIDTH}x${DEFAULT_PANEL_HEIGHT}`,
   );
 
+  electronSession.defaultSession.setPermissionRequestHandler(
+    (_webContents, permission, callback) => {
+      const allowed = new Set([
+        'media',
+        'mediaKeySystem',
+        'display-capture',
+        'audioCapture',
+        'videoCapture',
+      ]);
+      callback(allowed.has(String(permission)));
+    },
+  );
+  electronSession.defaultSession.setPermissionCheckHandler(
+    (_webContents, permission) => {
+      const name = String(permission);
+      return (
+        name === 'media' ||
+        name === 'display-capture' ||
+        name === 'audioCapture' ||
+        name === 'videoCapture'
+      );
+    },
+  );
+
   registerIpc();
   registerShortcuts();
   ensureOverlay();
   startElapsedTimer();
+  // Warm the tiny Whisper model in the background after UI is up.
+  setTimeout(() => {
+    void ensureTranscriber()
+      .then(() => {
+        session.modelReady = true;
+        appendLog('info', 'Whisper base.en ready for streaming transcription.');
+        broadcastSession();
+      })
+      .catch((err) => {
+        session.modelReady = false;
+        session.listenError = String(err);
+        appendLog('warn', `Whisper warmup failed: ${String(err)}`);
+        broadcastSession();
+      });
+  }, 1500);
 
   screen.on('display-metrics-changed', () => {
     const { maxWidth, maxHeight } = maxPanelBounds();
@@ -930,6 +1160,7 @@ app.whenReady().then(() => {
 });
 
 app.on('will-quit', () => {
+  setListening(false);
   stopElapsedTimer();
   stopStreaming();
   globalShortcut.unregisterAll();

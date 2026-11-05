@@ -1,11 +1,11 @@
-import { KeyValuePipe } from '@angular/common';
+import { DecimalPipe, KeyValuePipe } from '@angular/common';
 import { Component, OnDestroy, OnInit, signal } from '@angular/core';
 import { AppSnapshot, LogEntry, getApi } from '../electron-api';
 
 @Component({
   selector: 'app-diagnostics',
   standalone: true,
-  imports: [KeyValuePipe],
+  imports: [DecimalPipe, KeyValuePipe],
   templateUrl: './diagnostics.component.html',
   styleUrl: './diagnostics.component.css',
 })
