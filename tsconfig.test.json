@@ -1,0 +1,9 @@
+{
+  "extends": "./tsconfig.electron.json",
+  "compilerOptions": {
+    "outDir": "dist-test",
+    "sourceMap": false
+  },
+  "include": ["electron/**/*.ts"],
+  "exclude": []
+}

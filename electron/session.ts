@@ -4,8 +4,15 @@ export type InsightAction = {
   icon: 'book' | 'globe' | 'chat' | 'sparkle' | 'reply';
 };
 
-export type AsrBackendId = 'qwen' | 'whisper';
-export type AsrLanguageId = 'auto' | 'en' | 'fr' | 'ar';
+import {
+  BACKEND_LABELS,
+  DEFAULT_ASR_BACKEND,
+  DEFAULT_ASR_LANGUAGE,
+  type AsrBackendId,
+  type AsrLanguageId,
+} from './asr/constants';
+
+export type { AsrBackendId, AsrLanguageId };
 
 export type TranscriptLine = {
   id: string;
@@ -66,6 +73,8 @@ export type SessionState = {
   detectedLanguage: string | null;
   asrModelLabel: string;
   asrSetupMessage: string | null;
+  /** True when the overlay is excluded from screen capture. */
+  contentProtection: boolean;
 };
 
 export const ASK_ACCELERATOR = 'CommandOrControl+Return';
@@ -125,12 +134,13 @@ export function createInitialSession(): SessionState {
     listenStatus: 'idle',
     listenError: null,
     modelReady: false,
-    asrBackend: 'whisper',
-    asrLanguage: 'auto',
+    asrBackend: DEFAULT_ASR_BACKEND,
+    asrLanguage: DEFAULT_ASR_LANGUAGE,
     asrCompareMode: false,
     detectedLanguage: null,
-    asrModelLabel: 'Whisper base',
+    asrModelLabel: BACKEND_LABELS[DEFAULT_ASR_BACKEND],
     asrSetupMessage: null,
+    contentProtection: true,
   };
 }
 

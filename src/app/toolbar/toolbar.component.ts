@@ -24,12 +24,18 @@ export class ToolbarComponent implements OnInit {
   readonly insightsOpen = computed(() => this.session()?.insightsVisible ?? false);
   readonly responseOpen = computed(() => this.session()?.responseVisible ?? false);
   readonly panelsHidden = computed(() => this.session()?.panelsHidden ?? false);
+  /** Overlay is protected from screen capture unless settings say otherwise. */
+  readonly protectedFromCapture = computed(() => this.session()?.contentProtection ?? true);
   readonly menuOpen = computed(() => this.session()?.menuOpen ?? false);
   readonly askLabel = computed(() => this.session()?.askShortcutLabel ?? 'Ctrl+Enter');
   readonly hideLabel = computed(() => this.session()?.hideShortcutLabel ?? 'Ctrl+\\');
 
   ngOnInit(): void {
     void this.sessions.init();
+  }
+
+  enableProtection(): void {
+    void getApi()?.setContentProtection?.(true);
   }
 
   toggleListen(): void {

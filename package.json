@@ -10,10 +10,11 @@
     "build:angular": "ng build",
     "build:electron": "tsc -p tsconfig.electron.json",
     "build": "npm run build:angular && npm run build:electron",
-    "start": "npm run build && electron .",
-    "dev": "npm run build:electron && concurrently -k \"ng serve --port 4200\" \"wait-on http://localhost:4200 && cross-env ELECTRON_DEV=1 electron .\"",
+    "start": "npm run build && node scripts/run-electron.js",
+    "dev": "npm run build:electron && concurrently -k \"ng serve --port 4200\" \"wait-on http://localhost:4200 && cross-env ELECTRON_DEV=1 node scripts/run-electron.js\"",
     "package:win": "npm run build && electron-builder --win --x64",
-    "typecheck": "tsc -p tsconfig.electron.json --noEmit && ng build --configuration=development"
+    "typecheck": "tsc -p tsconfig.electron.json --noEmit && ng build --configuration=development",
+    "test": "tsc -p tsconfig.test.json && node --test \"dist-test/**/*.test.js\""
   },
   "build": {
     "appId": "com.meetingcopilot.overlay",

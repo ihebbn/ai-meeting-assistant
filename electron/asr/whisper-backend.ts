@@ -1,6 +1,7 @@
 import * as path from 'path';
 import { app } from 'electron';
 import type { AsrLanguageId } from './constants';
+import { cleanupTranscript, guessLanguageFromScript } from './text';
 
 type AsrPipeline = (
   audio: Float32Array,
@@ -176,16 +177,7 @@ function inferLanguage(text: string, requested: AsrLanguageId): string | null {
   if (requested !== 'auto') {
     return requested;
   }
-  if (/[\u0600-\u06FF]/.test(text)) {
-    return 'ar';
-  }
-  if (/[àâäæçéèêëïîôœùûüÿÀÂÄÆÇÉÈÊËÏÎÔŒÙÛÜŸ]/.test(text)) {
-    return 'fr';
-  }
-  if (/[A-Za-z]/.test(text)) {
-    return 'en';
-  }
-  return null;
+  return guessLanguageFromScript(text);
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
@@ -227,16 +219,3 @@ function normalizePcm(pcm: Float32Array, targetPeak = 0.8): Float32Array {
   return out;
 }
 
-function cleanupTranscript(text: string): string {
-  return text
-    .replace(/\*[^*]*\*/g, ' ')
-    .replace(/\[[^\]]*\]/g, ' ')
-    .replace(/\([^)]*\)/g, ' ')
-    .replace(
-      /\b(uh|um|erm|inaudible|music|blank_audio|gibberish|clicks?|clicking|sighs?)\b/gi,
-      ' ',
-    )
-    .replace(/\s+/g, ' ')
-    .replace(/^[,.\s]+|[,.\s]+$/g, '')
-    .trim();
-}

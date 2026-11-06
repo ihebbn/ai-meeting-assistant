@@ -77,6 +77,7 @@ export type SessionView = {
   detectedLanguage: string | null;
   asrModelLabel: string;
   asrSetupMessage: string | null;
+  contentProtection: boolean;
 };
 
 export type ProtectionState = {
@@ -136,6 +137,7 @@ export type MeetingCopilotApi = {
   resizePanel?: (width: number, height: number) => Promise<SessionView>;
   getPanelSize?: () => Promise<OverlaySize>;
   copyText?: (text: string) => Promise<boolean>;
+  setContentProtection?: (enabled: boolean) => Promise<SessionView>;
   quit: () => Promise<void>;
   openDiagnostics?: () => Promise<boolean>;
   openMicSettings?: () => Promise<boolean>;

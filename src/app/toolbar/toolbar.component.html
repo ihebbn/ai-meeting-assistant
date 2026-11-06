@@ -42,6 +42,18 @@
 
   <div class="timer">{{ elapsed() }}</div>
 
+  @if (!protectedFromCapture()) {
+    <button
+      type="button"
+      class="capture-warning"
+      title="Overlay is visible in screen share. Click to hide it from capture."
+      aria-label="Overlay is visible in screen capture. Click to enable capture protection."
+      (click)="enableProtection()"
+    >
+      Visible
+    </button>
+  }
+
   <div class="divider" aria-hidden="true"></div>
 
   <button type="button" class="action" (click)="ask()">

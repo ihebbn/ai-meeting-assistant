@@ -31,6 +31,8 @@ contextBridge.exposeInMainWorld('meetingCopilot', {
     ipcRenderer.invoke('overlay:resize-panel', width, height),
   getPanelSize: () => ipcRenderer.invoke('overlay:get-panel-size'),
   copyText: (text: string) => ipcRenderer.invoke('app:copy-text', text),
+  setContentProtection: (enabled: boolean) =>
+    ipcRenderer.invoke('settings:set-content-protection', enabled),
   quit: () => ipcRenderer.invoke('app:quit'),
   openDiagnostics: () => ipcRenderer.invoke('app:open-diagnostics'),
   openMicSettings: () => ipcRenderer.invoke('app:open-mic-settings'),

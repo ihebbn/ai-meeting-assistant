@@ -9,3 +9,4 @@ release/
 Thumbs.db
 *.exe
 *.blockmap
+dist-test/

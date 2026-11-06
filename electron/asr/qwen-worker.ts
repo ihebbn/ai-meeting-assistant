@@ -3,6 +3,7 @@
  * Protocol: parent <-> child JSON messages over IPC.
  */
 import * as path from 'path';
+import { cleanupTranscript, guessLanguageFromScript } from './text';
 
 type InitMessage = {
   type: 'init';
@@ -75,20 +76,6 @@ function loadRecognizer(modelDir: string): void {
   });
 }
 
-function cleanupTranscript(text: string): string {
-  return text
-    .replace(/\*[^*]*\*/g, ' ')
-    .replace(/\[[^\]]*\]/g, ' ')
-    .replace(/\([^)]*\)/g, ' ')
-    .replace(
-      /\b(uh|um|erm|inaudible|music|blank_audio|gibberish|clicks?|clicking|sighs?)\b/gi,
-      ' ',
-    )
-    .replace(/\s+/g, ' ')
-    .replace(/^[,.\s]+|[,.\s]+$/g, '')
-    .trim();
-}
-
 function inferLanguage(
   result: { text?: string; lang?: string; tokens?: string[] },
   cleaned: string,
@@ -104,16 +91,7 @@ function inferLanguage(
   if (scaffold?.[1]) {
     return normalizeLang(scaffold[1].trim());
   }
-  if (/[\u0600-\u06FF]/.test(cleaned)) {
-    return 'ar';
-  }
-  if (/[àâäæçéèêëïîôœùûüÿÀÂÄÆÇÉÈÊËÏÎÔŒÙÛÜŸ]/.test(cleaned)) {
-    return 'fr';
-  }
-  if (/[A-Za-z]/.test(cleaned)) {
-    return 'en';
-  }
-  return null;
+  return guessLanguageFromScript(cleaned);
 }
 
 function normalizeLang(value: string): string {

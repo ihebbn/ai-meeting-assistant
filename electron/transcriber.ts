@@ -28,6 +28,7 @@ import {
   isWhisperReady,
   transcribeWithWhisper,
 } from './asr/whisper-backend';
+import { getSettings } from './settings';
 
 export type TranscriptResult = {
   text: string;
@@ -51,11 +52,13 @@ export type TranscriberStatus = {
 };
 
 /**
- * Flip to true only after Windows acceptance checks in VERIFICATION.md are Pass.
- * Until then Qwen is preferred when ready, but Whisper remains the safe fallback
- * if Qwen model download/init fails.
+ * Read from settings.json (`qwenAcceptancePassed`). Set it to true only after the
+ * Windows acceptance checks in VERIFICATION.md are Pass. Until then Qwen is preferred
+ * when ready, but Whisper remains the safe fallback if Qwen download/init fails.
  */
-const QWEN_ACCEPTANCE_PASSED = false;
+function isQwenAcceptancePassed(): boolean {
+  return getSettings().qwenAcceptancePassed;
+}
 
 let backend: AsrBackendId = DEFAULT_ASR_BACKEND;
 let language: AsrLanguageId = DEFAULT_ASR_LANGUAGE;
@@ -99,7 +102,7 @@ export function getTranscriberStatus(): TranscriberStatus {
         : `Whisper (${getWhisperModelId().replace('Xenova/', '')})`,
     languageLabel: LANGUAGE_LABELS[language],
     qwenSetup: getQwenSetupState(),
-    acceptanceDefaultUnlocked: QWEN_ACCEPTANCE_PASSED,
+    acceptanceDefaultUnlocked: isQwenAcceptancePassed(),
   };
 }
 
@@ -194,7 +197,7 @@ export async function ensureTranscriber(): Promise<void> {
       emitStatus();
       await ensureWhisperBackend(language);
       emitStatus();
-      if (QWEN_ACCEPTANCE_PASSED) {
+      if (isQwenAcceptancePassed()) {
         throw new Error(message);
       }
       // Soft-fail: Whisper is ready; UI shows the setup warning via status.error.
@@ -266,7 +269,7 @@ async function transcribeCompare(
 
 /** Warm preferred backends without failing app startup. */
 export async function warmTranscriber(): Promise<void> {
-  if (DEFAULT_ASR_BACKEND === 'qwen' && (QWEN_ACCEPTANCE_PASSED || getQwenSetupState().status === 'ready')) {
+  if (DEFAULT_ASR_BACKEND === 'qwen' && (isQwenAcceptancePassed() || getQwenSetupState().status === 'ready')) {
     backend = 'qwen';
     try {
       await ensureQwenBackend();
@@ -275,7 +278,7 @@ export async function warmTranscriber(): Promise<void> {
     } catch {
       backend = 'whisper';
     }
-  } else if (!QWEN_ACCEPTANCE_PASSED && getQwenSetupState().status !== 'ready') {
+  } else if (!isQwenAcceptancePassed() && getQwenSetupState().status !== 'ready') {
     // Keep Whisper warm until the operator finishes Qwen acceptance.
     backend = 'whisper';
   }

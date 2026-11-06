@@ -48,12 +48,15 @@ import {
   type TranscriptResult,
 } from './transcriber';
 import type { AsrBackendId, AsrLanguageId } from './session';
+import { getSettings, initSettings, updateSettings } from './settings';
 
 const isDev = process.env['ELECTRON_DEV'] === '1';
 const OVERLAY_BG = '#00000000';
 
-/** Set true to exclude overlay from screenshots / screen share. Off temporarily for design captures. */
-const CONTENT_PROTECTION_ENABLED = false;
+/** Exclude overlay from screenshots / screen share. Stored in settings.json (default on). */
+function isContentProtectionEnabled(): boolean {
+  return getSettings().contentProtection;
+}
 
 // Windows: keep layered-window transparency working for always-on-top overlays.
 if (process.platform === 'win32') {
@@ -86,12 +89,12 @@ let menuWindow: BrowserWindow | null = null;
 
 let session: SessionState = createInitialSession();
 let contentProtection: ProtectionState = {
-  requested: CONTENT_PROTECTION_ENABLED,
+  requested: isContentProtectionEnabled(),
   applied: false,
   lastError: null,
   appliedAt: null,
   windows: {},
-  enabledForDesignCapture: !CONTENT_PROTECTION_ENABLED,
+  enabledForDesignCapture: !isContentProtectionEnabled(),
 };
 const logEntries: LogEntry[] = [];
 let logFilePath = '';
@@ -166,21 +169,23 @@ function loadRoute(win: BrowserWindow, route: string): void {
 }
 
 function applyContentProtection(win: BrowserWindow, name: SurfaceName): void {
-  contentProtection.requested = CONTENT_PROTECTION_ENABLED;
-  contentProtection.enabledForDesignCapture = !CONTENT_PROTECTION_ENABLED;
+  const enabled = isContentProtectionEnabled();
+  contentProtection.requested = enabled;
+  contentProtection.enabledForDesignCapture = !enabled;
+  session.contentProtection = enabled;
   try {
-    win.setContentProtection(CONTENT_PROTECTION_ENABLED);
-    contentProtection.windows[name] = CONTENT_PROTECTION_ENABLED;
-    contentProtection.applied = CONTENT_PROTECTION_ENABLED
+    win.setContentProtection(enabled);
+    contentProtection.windows[name] = enabled;
+    contentProtection.applied = enabled
       ? Object.values(contentProtection.windows).every(Boolean)
       : false;
     contentProtection.lastError = null;
     contentProtection.appliedAt = nowIso();
     appendLog(
       'info',
-      CONTENT_PROTECTION_ENABLED
+      enabled
         ? `setContentProtection(true) on ${name}.`
-        : `Content protection OFF on ${name} (design screenshots enabled).`,
+        : `Content protection OFF on ${name} (overlay is visible in screen capture).`,
     );
   } catch (err) {
     contentProtection.windows[name] = false;
@@ -1167,6 +1172,21 @@ function registerIpc(): void {
     return logFilePath;
   });
 
+  ipcMain.handle('settings:set-content-protection', (_e, enabled: boolean) => {
+    updateSettings({ contentProtection: !!enabled });
+    for (const [win, name] of [
+      [overlayWindow, 'overlay'],
+      [diagnosticsWindow, 'diagnostics'],
+      [menuWindow, 'menu'],
+    ] as Array<[BrowserWindow | null, SurfaceName]>) {
+      if (win && !win.isDestroyed()) {
+        applyContentProtection(win, name);
+      }
+    }
+    broadcastSession();
+    return getPublicSession();
+  });
+
   ipcMain.handle('app:copy-text', (_e, text: string) => {
     clipboard.writeText(String(text ?? ''));
     return true;
@@ -1200,6 +1220,8 @@ function registerShortcuts(): void {
 
 app.whenReady().then(() => {
   const userData = app.getPath('userData');
+  initSettings(userData);
+  session.contentProtection = isContentProtectionEnabled();
   logFilePath = path.join(userData, 'meeting-copilot-m1.log');
   appendLog('info', `Meeting Copilot M1 starting. Log file: ${logFilePath}`);
   appendLog('info', `Windows: ${getWindowsBuild()}`);
