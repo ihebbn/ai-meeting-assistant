@@ -10,3 +10,5 @@ Thumbs.db
 *.exe
 *.blockmap
 dist-test/
+bench-data/
+bench-report*.json

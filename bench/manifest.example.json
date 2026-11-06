@@ -1,0 +1,25 @@
+{
+  "clips": [
+    {
+      "id": "en-greeting",
+      "audio": "../bench-data/en-greeting.wav",
+      "reference": "Good morning everyone, let's get started.",
+      "language": "auto",
+      "tags": ["english"]
+    },
+    {
+      "id": "fr-question",
+      "audio": "../bench-data/fr-question.wav",
+      "reference": "Est-ce que vous pouvez partager votre écran ?",
+      "language": "auto",
+      "tags": ["french"]
+    },
+    {
+      "id": "tn-fr-mixed",
+      "audio": "../bench-data/tn-fr-mixed.wav",
+      "reference": "replace with your exact transcript of the mixed Tunisian/French clip",
+      "language": "auto",
+      "tags": ["tunisian-mixed"]
+    }
+  ]
+}

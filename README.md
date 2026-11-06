@@ -101,3 +101,17 @@ Dev: `npm run dev` · Package: `npm run package:win`
 ## Remote verification
 
 From a second participant in Meet/Teams, confirm the overlay stays invisible while you **drag**, **resize**, **collapse**, and **reopen** panels. Record dual-audio + multilingual ASR results in [`VERIFICATION.md`](VERIFICATION.md) before wiring Ask AI to the live transcript.
+
+## Benchmarking ASR (Qwen vs Whisper)
+
+`npm run bench` decodes your own short clips with the same backends and model cache as the app, then reports pooled **WER** and **CER**, decode latency (p50 / p95) and real-time factor, per backend, language and tag.
+
+```bash
+npm run bench -- bench/manifest.example.json --backend both --out bench-report.json
+```
+
+- **Clips:** record 16-bit PCM or float32 WAV files yourself (any sample rate or channel count; they are mixed to mono and resampled to 16 kHz). Keep them utterance-sized, about 2–6 s, because the app decodes at most ~5.5 s at a time. Use only your own voice or content you may use. Put them in `bench-data/` (git-ignored).
+- **Manifest:** `{ "clips": [{ "id", "audio", "reference", "language"?, "tags"? }] }`. `audio` is relative to the manifest file; `language` is `auto`, `en`, `fr` or `ar`. See [`bench/manifest.example.json`](bench/manifest.example.json).
+- **Scoring:** reference and output are normalised the same way (case, punctuation, Arabic diacritics and alef variants) before comparison. WER can exceed 100% when the model inserts many words. Failed decodes are excluded from the rates and counted in the `fail` column; the process exits with code 2 if any failed.
+- **Latency:** decode time only. It excludes the 420 ms end-of-speech wait and the IPC hop, so on-screen latency in the app is higher.
+- **Models:** the first Qwen run downloads about 1 GB into the app's `asr-models` folder, the same one the app uses.
