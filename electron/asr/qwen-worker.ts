@@ -184,6 +184,11 @@ process.on('message', (msg: ParentMessage) => {
     return;
   }
   if (msg.type === 'init') {
+    if (recognizer) {
+      // Already loaded: never rebuild (a second WASM recognizer aborts).
+      send({ type: 'ready', modelDir: msg.modelDir });
+      return;
+    }
     try {
       loadRecognizer(msg.modelDir);
       send({ type: 'ready', modelDir: msg.modelDir });

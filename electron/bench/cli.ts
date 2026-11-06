@@ -110,7 +110,10 @@ async function run(options: Options): Promise<number> {
     }
     // Discard one decode so model/JIT warm-up does not skew the first latency.
     const first = clips[0]!;
-    await transcribe(backend, audio.get(first.id)!.samples, first.language).catch(() => '');
+    await transcribe(backend, audio.get(first.id)!.samples, first.language).catch((err: unknown) => {
+      log(`warning: [${backend}] warm-up decode failed: ${String(err)}`);
+      return '';
+    });
 
     for (const clip of clips) {
       const decoded = audio.get(clip.id)!;

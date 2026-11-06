@@ -171,6 +171,16 @@ async function ensureWorker(): Promise<void> {
       const timer = setTimeout(() => {
         reject(new Error('Qwen ASR worker init timed out'));
       }, 180_000);
+      // Init must be sent exactly once: a second init makes the worker rebuild the
+      // recognizer, which aborts in WASM and discards the working one.
+      let initSent = false;
+      const sendInit = () => {
+        if (initSent || !proc.connected) {
+          return;
+        }
+        initSent = true;
+        proc.send({ type: 'init', modelDir });
+      };
       const onMsg = (msg: Record<string, unknown>) => {
         if (msg?.['type'] === 'ready') {
           clearTimeout(timer);
@@ -181,13 +191,14 @@ async function ensureWorker(): Promise<void> {
           proc.off('message', onMsg);
           reject(new Error(String(msg['error'])));
         } else if (msg?.['type'] === 'boot') {
-          proc.send({ type: 'init', modelDir });
+          sendInit();
         }
       };
       proc.on('message', onMsg);
+      // Fallback in case the boot message was missed; guarded by initSent.
       setTimeout(() => {
-        if (!ready && proc.connected) {
-          proc.send({ type: 'init', modelDir });
+        if (!ready) {
+          sendInit();
         }
       }, 250);
     });
