@@ -73,6 +73,9 @@ export type SessionState = {
   detectedLanguage: string | null;
   asrModelLabel: string;
   asrSetupMessage: string | null;
+  /** State of the transcript-based suggestions in Live Insights. */
+  suggestionsStatus: 'idle' | 'loading' | 'error';
+  suggestionsMessage: string | null;
   /** True when the overlay is excluded from screen capture. */
   contentProtection: boolean;
 };
@@ -108,19 +111,9 @@ export function createInitialSession(): SessionState {
     recap: [
       'Press Listen to capture your microphone (You) and Windows system audio.',
       'Language defaults to Auto — English, French, and Arabic segments are detected per phrase.',
-      'Switch Qwen / Whisper in Live Insights for side-by-side testing. Pick an AI provider and add its API key in Settings (⋮ menu) to get real Ask AI answers grounded on the live transcript; without one, Ask AI shows labelled sample answers.',
+      'Switch Qwen / Whisper in Live Insights for side-by-side testing. Pick an AI provider and add its API key in Settings (⋮ menu) to get real Ask AI answers grounded on the live transcript; without one, Ask AI tells you what to set up. Suggestions are generated from the live transcript when you press Suggest.',
     ],
-    actions: [
-      { id: 'define', label: 'Define startup acquisition', icon: 'book' },
-      {
-        id: 'search-windsurf',
-        label: 'Search the web for information about Windsurf acquisition',
-        icon: 'globe',
-      },
-      { id: 'followups', label: 'Suggest follow-up questions', icon: 'chat' },
-      { id: 'helpful', label: 'Give me helpful information', icon: 'sparkle' },
-      { id: 'reply', label: 'Suggest a reply', icon: 'reply' },
-    ],
+    actions: [],
     transcript: [],
     currentQuestion: '',
     messages: [],
@@ -140,44 +133,15 @@ export function createInitialSession(): SessionState {
     detectedLanguage: null,
     asrModelLabel: BACKEND_LABELS[DEFAULT_ASR_BACKEND],
     asrSetupMessage: null,
+    suggestionsStatus: 'idle',
+    suggestionsMessage: null,
     contentProtection: true,
   };
 }
 
-const SAMPLE_ANSWERS: Record<string, string> = {
-  define:
-    'A startup acquisition is when an established company buys a younger company — usually for its product, talent, customers, or intellectual property — instead of building the same capability from scratch.',
-  'search-windsurf':
-    "On July 14, 2025, Cognition acquired the remainder of Windsurf to integrate into its Devin platform. Includes Windsurf's agentic IDE, IP, brand, $82 M ARR, 350+ enterprise clients, and full team.",
-  followups:
-    '• What drove Cognition to buy Windsurf instead of competing?\n• How does Windsurf’s IDE fit into Devin’s roadmap?\n• What happens to Windsurf’s enterprise contracts after the deal?\n• Are similar coding-tool acquisitions likely this year?',
-  helpful:
-    'Useful talking points: Cognition is known for Devin, an autonomous coding agent. Buying Windsurf strengthens the IDE + agent stack, adds recurring revenue, and brings an experienced product team. Frame it as consolidation in the AI developer-tools market.',
-  reply:
-    'Suggested reply: “Cognition acquired Windsurf in July 2025 to fold its agentic IDE and team into Devin — it looks like a capability + talent deal, not just a brand buy.”',
-  default:
-    'Ask AI is still on sample answers. Verify microphone + system-audio transcription with headphones in a real call before wiring answers to the live transcript.',
-};
-
-export function answerForPrompt(prompt: string, actionId?: string): string {
-  if (actionId && SAMPLE_ANSWERS[actionId]) {
-    return SAMPLE_ANSWERS[actionId];
-  }
-  const lower = prompt.toLowerCase();
-  if (lower.includes('windsurf') || lower.includes('acquisition')) {
-    return SAMPLE_ANSWERS['search-windsurf'];
-  }
-  if (lower.includes('follow-up') || lower.includes('follow up')) {
-    return SAMPLE_ANSWERS.followups;
-  }
-  if (lower.includes('reply')) {
-    return SAMPLE_ANSWERS.reply;
-  }
-  if (lower.includes('define')) {
-    return SAMPLE_ANSWERS.define;
-  }
-  return SAMPLE_ANSWERS.default;
-}
+/** Shown instead of an answer when no AI provider is usable. */
+export const NO_PROVIDER_MESSAGE =
+  'No AI provider is configured. Open Settings from the ⋮ menu, pick a provider and add its API key to get answers.';
 
 export function anyPanelOpen(session: SessionState): boolean {
   if (session.panelsHidden) {

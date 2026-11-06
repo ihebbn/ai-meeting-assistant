@@ -24,6 +24,7 @@ contextBridge.exposeInMainWorld('meetingCopilot', {
     ipcRenderer.invoke('session:toggle-panel', panel),
   runAction: (actionId: string) => ipcRenderer.invoke('session:run-action', actionId),
   ask: (prompt: string) => ipcRenderer.invoke('session:ask', prompt),
+  refreshSuggestions: () => ipcRenderer.invoke('session:refresh-suggestions'),
   setFollowUpDraft: (draft: string) =>
     ipcRenderer.invoke('session:set-follow-up-draft', draft),
   closeResponse: () => ipcRenderer.invoke('session:close-response'),

@@ -77,6 +77,8 @@ export type SessionView = {
   detectedLanguage: string | null;
   asrModelLabel: string;
   asrSetupMessage: string | null;
+  suggestionsStatus: 'idle' | 'loading' | 'error';
+  suggestionsMessage: string | null;
   contentProtection: boolean;
 };
 
@@ -99,6 +101,7 @@ export type AiState = {
   supportsEffort: boolean;
   baseUrl: string | null;
   baseUrlEditable: boolean;
+  autoSuggest: boolean;
   error?: string | null;
 };
 
@@ -156,6 +159,7 @@ export type MeetingCopilotApi = {
   togglePanel?: (panel: 'insights' | 'response') => Promise<SessionView>;
   runAction?: (actionId: string) => Promise<SessionView>;
   ask?: (prompt: string) => Promise<SessionView>;
+  refreshSuggestions?: () => Promise<SessionView>;
   setFollowUpDraft?: (draft: string) => Promise<SessionView>;
   closeResponse?: () => Promise<SessionView>;
   resizePanel?: (width: number, height: number) => Promise<SessionView>;
@@ -169,6 +173,7 @@ export type MeetingCopilotApi = {
   getAiState?: () => Promise<AiState>;
   setAiProvider?: (providerId: string) => Promise<AiState>;
   setAiBaseUrl?: (baseUrl: string) => Promise<AiState>;
+  setAiAutoSuggest?: (enabled: boolean) => Promise<AiState>;
   setAiApiKey?: (apiKey: string) => Promise<AiState>;
   clearAiApiKey?: () => Promise<AiState>;
   listAiModels?: () => Promise<{ models: AiModelInfo[]; error: string | null }>;

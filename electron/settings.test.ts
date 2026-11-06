@@ -43,6 +43,12 @@ describe('normalizeSettings', () => {
     assert.equal(out.aiEffort, 'high');
   });
 
+  it('keeps auto suggestions off by default and validates the flag', () => {
+    assert.equal(DEFAULT_SETTINGS.aiAutoSuggest, false);
+    assert.equal(normalizeSettings({ aiAutoSuggest: true }).aiAutoSuggest, true);
+    assert.equal(normalizeSettings({ aiAutoSuggest: 'yes' }).aiAutoSuggest, false);
+  });
+
   it('falls back to defaults for invalid AI fields', () => {
     const out = normalizeSettings({ aiProvider: 'Bad Provider!', aiModels: 'x', aiBaseUrls: [], aiEffort: 'max' });
     assert.equal(out.aiProvider, DEFAULT_SETTINGS.aiProvider);

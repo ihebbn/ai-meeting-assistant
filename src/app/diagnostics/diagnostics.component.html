@@ -116,6 +116,20 @@
               </select>
             </div>
           }
+          <div class="ai-row">
+            <label for="ai-auto">Auto suggestions</label>
+            <input
+              id="ai-auto"
+              type="checkbox"
+              class="ai-check"
+              [checked]="state.autoSuggest"
+              (change)="onAutoSuggestChange($event)"
+            />
+            <span class="note-inline">
+              Refresh suggestions while listening (at most every 45 s, after 3 new lines). Off by default
+              because it sends the transcript on its own.
+            </span>
+          </div>
           <p class="note">
             Your question and the recent live transcript are sent to {{ state.providerLabel }}. Type any
             model id, or pick one from the provider's list.

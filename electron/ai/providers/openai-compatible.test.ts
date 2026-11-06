@@ -52,6 +52,29 @@ describe('OpenAiCompatibleProvider.ask', () => {
     }
   });
 
+  it('uses the system and content overrides when given (suggestions)', async () => {
+    const server = await startMockServer((_req, res) => {
+      sseHeaders(res);
+      res.end('data: [DONE]\n\n');
+    });
+    try {
+      await new OpenAiCompatibleProvider().ask({
+        ...baseParams,
+        baseUrl: server.baseUrl,
+        system: 'CUSTOM SYSTEM',
+        content: 'CUSTOM CONTENT',
+        onDelta: () => undefined,
+      });
+      const body = JSON.parse(server.requests[0]!.body);
+      assert.deepEqual(body.messages, [
+        { role: 'system', content: 'CUSTOM SYSTEM' },
+        { role: 'user', content: 'CUSTOM CONTENT' },
+      ]);
+    } finally {
+      await server.close();
+    }
+  });
+
   it('reassembles events split across arbitrary network writes', async () => {
     const payload = chunk({ content: 'Hello ' }) + chunk({ content: 'wörld' }) + chunk({}, 'stop') + 'data: [DONE]\n\n';
     const server = await startMockServer((_req, res) => {

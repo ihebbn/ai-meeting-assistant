@@ -111,8 +111,21 @@
           }
         </ul>
 
-        <h3>Actions</h3>
-        <div class="actions">
+        <div class="suggest-head">
+          <h3>Suggestions</h3>
+          <button
+            type="button"
+            class="text-btn"
+            [disabled]="snap.suggestionsStatus === 'loading'"
+            (click)="refreshSuggestions()"
+          >
+            {{ snap.suggestionsStatus === 'loading' ? 'Thinking…' : 'Suggest' }}
+          </button>
+        </div>
+        @if (snap.suggestionsStatus === 'error') {
+          <p class="listen-error" role="alert">{{ snap.suggestionsMessage }}</p>
+        }
+        <div class="actions" aria-live="polite">
           @for (action of snap.actions; track action.id) {
             <button type="button" class="action" (click)="runAction(action.id)">
               <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -122,6 +135,14 @@
             </button>
           }
         </div>
+        @if (!snap.actions.length && snap.suggestionsStatus !== 'error') {
+          <p class="empty">
+            {{
+              snap.suggestionsMessage ??
+                'Press Suggest to get ideas from the live transcript.'
+            }}
+          </p>
+        }
       }
     </div>
   </section>

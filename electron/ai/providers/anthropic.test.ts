@@ -81,6 +81,18 @@ describe('AnthropicProvider.ask', () => {
     assert.ok(content.includes('<question>\nWhat did they ask?\n</question>'));
   });
 
+  it('uses the system and content overrides when given (suggestions)', async () => {
+    const { client, calls } = fakeClient({ events: [textEvent('x')] });
+    await new AnthropicProvider(() => client).ask({
+      ...base,
+      system: 'CUSTOM SYSTEM',
+      content: 'CUSTOM CONTENT',
+      onDelta: () => undefined,
+    });
+    assert.equal(calls[0]!.system, 'CUSTOM SYSTEM');
+    assert.equal((calls[0]!.messages[0] as { content: unknown }).content, 'CUSTOM CONTENT');
+  });
+
   it('ignores non-text events and omits effort and thinking by default', async () => {
     const { client, calls } = fakeClient({
       events: [{ type: 'message_start' }, { type: 'content_block_delta', delta: { type: 'input_json_delta' } }, textEvent('ok')],

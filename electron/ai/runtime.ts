@@ -9,7 +9,12 @@ import {
   type AiProvider,
   type AskResult,
 } from './types';
-import type { TranscriptLine } from './prompt';
+import {
+  SUGGEST_SYSTEM_PROMPT,
+  type TranscriptLine,
+  buildSuggestContent,
+  parseSuggestions,
+} from './prompt';
 
 export type KeySource = 'stored' | 'env' | null;
 
@@ -32,6 +37,8 @@ export type AiState = {
   supportsEffort: boolean;
   baseUrl: string | null;
   baseUrlEditable: boolean;
+  /** Refresh suggestions automatically while listening (sends transcript on its own). */
+  autoSuggest: boolean;
 };
 
 type RuntimeDeps = {
@@ -48,6 +55,7 @@ type RuntimeDeps = {
  */
 export class AiRuntime {
   private controller: AbortController | null = null;
+  private suggestController: AbortController | null = null;
 
   constructor(private readonly deps: RuntimeDeps) {}
 
@@ -103,6 +111,7 @@ export class AiRuntime {
       supportsEffort: this.deps.providers[def.kind].supportsEffort,
       baseUrl: this.baseUrl(def),
       baseUrlEditable: def.baseUrlEditable,
+      autoSuggest: settings.aiAutoSuggest,
     };
   }
 
@@ -163,5 +172,48 @@ export class AiRuntime {
   cancel(): void {
     this.controller?.abort();
     this.controller = null;
+  }
+
+  /**
+   * Suggestions grounded on the recent transcript. Runs at low effort, independently of
+   * answers (neither cancels the other), and a newer call supersedes an older one.
+   * Returns an empty list when the model declines or has nothing grounded to suggest.
+   */
+  async suggest(transcript: readonly TranscriptLine[]): Promise<string[]> {
+    const def = this.active();
+    const model = this.model(def);
+    if (!model) {
+      throw new AiConfigError(`Pick a model for ${def.label} in Settings.`);
+    }
+    const { apiKey } = this.resolveKey(def);
+    this.suggestController?.abort();
+    const controller = new AbortController();
+    this.suggestController = controller;
+    try {
+      const result = await this.deps.providers[def.kind].ask({
+        question: '',
+        transcript,
+        system: SUGGEST_SYSTEM_PROMPT,
+        content: buildSuggestContent(transcript),
+        onDelta: () => undefined,
+        model,
+        effort: 'low',
+        apiKey,
+        baseUrl: this.baseUrl(def),
+        signal: controller.signal,
+      });
+      return result.status === 'done' || result.status === 'truncated'
+        ? parseSuggestions(result.text)
+        : [];
+    } finally {
+      if (this.suggestController === controller) {
+        this.suggestController = null;
+      }
+    }
+  }
+
+  cancelSuggestions(): void {
+    this.suggestController?.abort();
+    this.suggestController = null;
   }
 }

@@ -15,6 +15,10 @@ export type AskParams = ProviderAuth & {
   transcript: readonly TranscriptLine[];
   model: string;
   effort: AiEffort;
+  /** Replaces the answer system prompt (used for suggestions). */
+  system?: string;
+  /** Replaces the user message built from question + transcript. */
+  content?: string;
   signal?: AbortSignal;
   onDelta: (text: string) => void;
 };

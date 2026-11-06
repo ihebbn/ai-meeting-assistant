@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld('meetingCopilot', {
   quit: () => ipcRenderer.invoke('app:quit'),
   getAiState: () => ipcRenderer.invoke('ai:get-state'),
   setAiProvider: (providerId: string) => ipcRenderer.invoke('ai:set-provider', providerId),
+  setAiAutoSuggest: (enabled: boolean) => ipcRenderer.invoke('ai:set-auto-suggest', enabled),
   setAiBaseUrl: (baseUrl: string) => ipcRenderer.invoke('ai:set-base-url', baseUrl),
   setAiApiKey: (apiKey: string) => ipcRenderer.invoke('ai:set-api-key', apiKey),
   clearAiApiKey: () => ipcRenderer.invoke('ai:clear-api-key'),

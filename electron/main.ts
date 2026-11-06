@@ -26,10 +26,10 @@ import {
   SessionState,
   TOOLBAR_HEIGHT,
   TOOLBAR_WIDTH,
-  answerForPrompt,
   anyPanelOpen,
   clampPanelSize,
   createInitialSession,
+  NO_PROVIDER_MESSAGE,
 } from './session';
 import {
   bumpListenGeneration,
@@ -57,6 +57,7 @@ import { GeminiProvider } from './ai/providers/gemini';
 import { OpenAiCompatibleProvider } from './ai/providers/openai-compatible';
 import { PROVIDERS, getProvider } from './ai/registry';
 import { AiRuntime } from './ai/runtime';
+import { MIN_LINES_FOR_SUGGESTIONS, shouldAutoSuggest } from './ai/suggest-policy';
 import { toFloat32Pcm } from './pcm';
 import { getSettings, initSettings, updateSettings } from './settings';
 
@@ -141,7 +142,6 @@ const aiRuntime = new AiRuntime({
 });
 
 let elapsedTimer: NodeJS.Timeout | null = null;
-let streamTimer: NodeJS.Timeout | null = null;
 let streamToken = 0;
 type MenuAnchor = {
   top: number;
@@ -774,46 +774,22 @@ function stopElapsedTimer(): void {
 function stopStreaming(): void {
   aiRuntime.cancel();
   streamToken += 1;
-  if (streamTimer) {
-    clearInterval(streamTimer);
-    streamTimer = null;
-  }
 }
 
-function streamAnswer(question: string, fullAnswer: string): void {
+/** Shows a fixed assistant message (no model call) in the AI panel. */
+function showNotice(question: string, text: string): void {
   stopStreaming();
-  const token = ++streamToken;
-  const assistantId = `a-${Date.now()}`;
   session.currentQuestion = question;
   session.messages = [
     { id: `u-${Date.now()}`, role: 'user', text: question },
-    { id: assistantId, role: 'assistant', text: '', streaming: true },
+    { id: `a-${Date.now()}`, role: 'assistant', text },
   ];
   session.responseOpen = true;
   session.panelsHidden = false;
   applyVisibility();
-
-  let index = 0;
-  const chars = fullAnswer.split('');
-  streamTimer = setInterval(() => {
-    if (token !== streamToken) {
-      return;
-    }
-    index = Math.min(chars.length, index + 3);
-    const partial = chars.slice(0, index).join('');
-    session.messages = session.messages.map((m) =>
-      m.id === assistantId
-        ? { ...m, text: partial, streaming: index < chars.length }
-        : m,
-    );
-    broadcastSession();
-    if (index >= chars.length) {
-      stopStreaming();
-    }
-  }, 18);
 }
 
-function askWithPrompt(prompt: string, actionId?: string): void {
+function askWithPrompt(prompt: string): void {
   const trimmed = prompt.trim();
   if (!trimmed) {
     return;
@@ -824,10 +800,7 @@ function askWithPrompt(prompt: string, actionId?: string): void {
     void streamLiveAnswer(trimmed);
     return;
   }
-  streamAnswer(
-    trimmed,
-    `[Sample answer. No API key is configured: add one in Settings to get real answers.]\n\n${answerForPrompt(trimmed, actionId)}`,
-  );
+  showNotice(trimmed, NO_PROVIDER_MESSAGE);
 }
 
 /** Streams a real model answer, grounded on the live transcript, into the AI panel. */
@@ -909,6 +882,78 @@ async function streamLiveAnswer(question: string): Promise<void> {
     const message = describeAiError(err, aiRuntime.errorContext());
     appendLog('warn', `Ask AI failed: ${message}`);
     show(message, false);
+  }
+}
+
+let suggestToken = 0;
+let suggestionsStartedAt: number | null = null;
+/** Lines appended since startup (the stored transcript is capped, so its length stalls). */
+let transcriptLinesTotal = 0;
+let linesAtLastSuggest = 0;
+
+/** Generates suggestions from the live transcript with the selected provider. */
+async function refreshSuggestions(): Promise<void> {
+  if (!aiRuntime.isConfigured()) {
+    session.actions = [];
+    session.suggestionsStatus = 'idle';
+    session.suggestionsMessage = 'Add an AI provider in Settings (⋮ menu) to get suggestions.';
+    broadcastSession();
+    return;
+  }
+  const lines = session.transcript.filter((line) => line.text.trim());
+  if (lines.length < MIN_LINES_FOR_SUGGESTIONS) {
+    session.suggestionsStatus = 'idle';
+    session.suggestionsMessage = 'Suggestions appear once there is some transcript.';
+    broadcastSession();
+    return;
+  }
+
+  const token = ++suggestToken;
+  suggestionsStartedAt = Date.now();
+  linesAtLastSuggest = transcriptLinesTotal;
+  session.suggestionsStatus = 'loading';
+  session.suggestionsMessage = null;
+  broadcastSession();
+  try {
+    const labels = await aiRuntime.suggest(lines.map(({ speaker, text }) => ({ speaker, text })));
+    if (token !== suggestToken) {
+      return;
+    }
+    session.actions = labels.map((label, index) => ({
+      id: `s-${token}-${index}`,
+      label,
+      icon: 'sparkle' as const,
+    }));
+    session.suggestionsStatus = 'idle';
+    session.suggestionsMessage = labels.length
+      ? null
+      : 'No suggestions for this part of the conversation yet.';
+  } catch (err) {
+    if (token !== suggestToken) {
+      return;
+    }
+    const message = describeAiError(err, aiRuntime.errorContext());
+    appendLog('warn', `Suggestions failed: ${message}`);
+    session.suggestionsStatus = 'error';
+    session.suggestionsMessage = message;
+  }
+  broadcastSession();
+}
+
+/** Opt-in, throttled by time and by new content (see ai/suggest-policy.ts). */
+function maybeAutoSuggest(): void {
+  if (
+    shouldAutoSuggest({
+      enabled: getSettings().aiAutoSuggest,
+      configured: aiRuntime.isConfigured(),
+      loading: session.suggestionsStatus === 'loading',
+      nowMs: Date.now(),
+      lastStartedMs: suggestionsStartedAt,
+      linesNow: transcriptLinesTotal,
+      linesAtLastRefresh: linesAtLastSuggest,
+    })
+  ) {
+    void refreshSuggestions();
   }
 }
 
@@ -1055,7 +1100,9 @@ function registerIpc(): void {
       if (session.topic === 'Live conversation' || session.topic.startsWith('Waiting')) {
         session.topic = 'Live conversation';
       }
+      transcriptLinesTotal += 1;
       broadcastSession();
+      maybeAutoSuggest();
       return getPublicSession();
     },
   );
@@ -1247,7 +1294,12 @@ function registerIpc(): void {
     if (!action) {
       return getPublicSession();
     }
-    askWithPrompt(action.label, action.id);
+    askWithPrompt(action.label);
+    return getPublicSession();
+  });
+
+  ipcMain.handle('session:refresh-suggestions', () => {
+    void refreshSuggestions();
     return getPublicSession();
   });
 
@@ -1374,6 +1426,12 @@ function registerIpc(): void {
     }
     updateSettings({ aiBaseUrls: urls });
     return { ...aiRuntime.getState(), error: null as string | null };
+  });
+
+  ipcMain.handle('ai:set-auto-suggest', (_e, enabled: boolean) => {
+    updateSettings({ aiAutoSuggest: !!enabled });
+    appendLog('info', `Auto suggestions ${getSettings().aiAutoSuggest ? 'on' : 'off'}.`);
+    return aiRuntime.getState();
   });
 
   ipcMain.handle('ai:set-effort', (_e, effort: string) => {
@@ -1511,6 +1569,7 @@ app.whenReady().then(() => {
 });
 
 app.on('will-quit', () => {
+  aiRuntime.cancelSuggestions();
   setListening(false);
   stopElapsedTimer();
   stopStreaming();

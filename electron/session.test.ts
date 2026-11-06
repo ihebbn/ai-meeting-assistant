@@ -4,8 +4,8 @@ import {
   MIN_PANEL_HEIGHT,
   MIN_PANEL_WIDTH,
   anyPanelOpen,
-  answerForPrompt,
   clampPanelSize,
+  NO_PROVIDER_MESSAGE,
   createInitialSession,
 } from './session';
 
@@ -44,20 +44,25 @@ describe('anyPanelOpen', () => {
   });
 });
 
-describe('answerForPrompt', () => {
-  it('prefers the action id when known', () => {
-    assert.match(answerForPrompt('anything', 'define'), /startup acquisition/i);
-  });
-
-  it('falls back to the default sample answer', () => {
-    assert.match(answerForPrompt('unrelated question'), /sample answers/i);
-  });
-});
-
 describe('createInitialSession', () => {
-  it('starts idle with an empty transcript', () => {
+  it('starts idle with an empty transcript and no canned suggestions', () => {
     const s = createInitialSession();
     assert.equal(s.listening, false);
     assert.equal(s.transcript.length, 0);
+    assert.deepEqual(s.actions, []);
+    assert.equal(s.suggestionsStatus, 'idle');
+    assert.equal(s.suggestionsMessage, null);
+  });
+
+  it('has no demo content about real companies or events', () => {
+    const s = createInitialSession();
+    assert.ok(!JSON.stringify(s).match(/windsurf|cognition|acquisition/i));
+  });
+});
+
+describe('NO_PROVIDER_MESSAGE', () => {
+  it('tells the user how to get answers', () => {
+    assert.match(NO_PROVIDER_MESSAGE, /Settings/);
+    assert.match(NO_PROVIDER_MESSAGE, /API key/);
   });
 });

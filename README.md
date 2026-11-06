@@ -1,12 +1,12 @@
 # Windows Meeting Copilot — Milestone 1
 
-One protected, movable, resizable frosted-glass overlay for Google Meet and Microsoft Teams. Live dual-source transcription (microphone + Windows system audio) with local ASR. Ask AI answers with the cloud provider and model you choose in Settings, grounded on the live transcript (sample answers are shown, clearly labelled, when no API key is configured).
+One protected, movable, resizable frosted-glass overlay for Google Meet and Microsoft Teams. Live dual-source transcription (microphone + Windows system audio) with local ASR. Ask AI answers with the cloud provider and model you choose in Settings, grounded on the live transcript (without a configured provider it tells you how to set one up).
 
 ## Unified overlay
 
 - **Toolbar** — dedicated drag grip moves the whole overlay; Listen/Stop, waveform, **You / Sys activity**, timer, Ask AI, **Insights** / **AI** reopen chips, Hide
-- **Live Insights** — own collapse control; transcript toggle; live **You** / **System audio** lines; ASR backend + language controls; sample recap + actions
-- **AI Response** — own collapse control; streaming sample answer; Copy; follow-up input
+- **Live Insights** — own collapse control; transcript toggle; live **You** / **System audio** lines; ASR backend + language controls; setup tips + **Suggestions** generated from the live transcript
+- **AI Response** — own collapse control; streaming model answer; Copy; follow-up input
 
 ### Listen
 
@@ -139,9 +139,17 @@ Provider facts were read from official docs on 2026-11-06. Recheck them before r
 - **Model:** the field accepts any model id; the suggestions come from the provider's own models endpoint, so they never go stale. Anthropic defaults to `claude-opus-5-5`; other providers have no default and you must pick one. The choice is remembered per provider in `settings.json` (`aiModels`).
 - **Reasoning effort** (`aiEffort`) is shown only for Anthropic, and only sent to models that report effort support. Other providers use their defaults, and no token limit is sent to them.
 
+### Suggestions
+
+With **Hide transcript** on, Live Insights shows a **Suggestions** list. Press **Suggest** and the selected provider proposes up to four short things worth asking right now (define a term just mentioned, summarise the last minutes, draft a reply, a follow-up question), grounded on the last ~4,000 characters of transcript, at low effort. Pressing a suggestion asks it like any question.
+
+- Suggestions are **only generated when you press Suggest**, unless you turn on **Auto suggestions** in Settings. Auto mode is off by default because it sends the transcript to your provider on its own; when on, it refreshes at most every 45 seconds and only after 3 new transcript lines.
+- With no provider configured, or fewer than two transcript lines, nothing is sent and the panel says what is missing.
+- Suggestions are model output: they can be wrong or miss things. The model is told to ground each one in what was said and to output nothing when there is too little content, but that is not enforced.
+
 ### Safety, privacy and cost
 
-- **Your data goes to the selected provider:** each question sends the question and the recent transcript window to that provider and is billed to your key. A lower-cost model reduces cost and latency.
+- **Your data goes to the selected provider:** each question, each Suggest press, and (if enabled) each automatic refresh sends the recent transcript to that provider and is billed to your key. A lower-cost model reduces cost and latency.
 - **Prompt injection:** the transcript is passed as untrusted data inside `<transcript>` tags and the system prompt tells the model never to follow instructions found in it, because anyone on the call can speak them. Tag-like text is neutralised. This reduces, but does not eliminate, the risk.
 - **Refusals and limits:** a declined request or an answer cut at the output limit is shown with a note. Anthropic server-side refusal fallbacks are **not** enabled.
 - **Cancel:** a new question, closing the AI panel, or quitting cancels the request in flight.

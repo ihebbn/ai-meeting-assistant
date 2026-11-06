@@ -100,11 +100,13 @@ export class GeminiProvider implements AiProvider {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          systemInstruction: { parts: [{ text: SYSTEM_PROMPT }] },
+          systemInstruction: { parts: [{ text: params.system ?? SYSTEM_PROMPT }] },
           contents: [
             {
               role: 'user',
-              parts: [{ text: buildUserContent(params.question, params.transcript) }],
+              parts: [
+                { text: params.content ?? buildUserContent(params.question, params.transcript) },
+              ],
             },
           ],
         }),

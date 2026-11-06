@@ -85,8 +85,11 @@ export class OpenAiCompatibleProvider implements AiProvider {
         body: JSON.stringify({
           model: params.model,
           messages: [
-            { role: 'system', content: SYSTEM_PROMPT },
-            { role: 'user', content: buildUserContent(params.question, params.transcript) },
+            { role: 'system', content: params.system ?? SYSTEM_PROMPT },
+            {
+              role: 'user',
+              content: params.content ?? buildUserContent(params.question, params.transcript),
+            },
           ],
           stream: true,
         }),

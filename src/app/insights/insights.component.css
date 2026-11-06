@@ -301,3 +301,19 @@ h3 {
 .transcript p[data-speaker='System audio'] strong {
   color: #86efac;
 }
+
+.suggest-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.suggest-head h3 {
+  margin: 0;
+}
+
+.suggest-head .text-btn:disabled {
+  opacity: 0.6;
+  cursor: default;
+}

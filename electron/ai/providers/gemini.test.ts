@@ -45,6 +45,27 @@ describe('GeminiProvider.ask', () => {
     }
   });
 
+  it('uses the system and content overrides when given (suggestions)', async () => {
+    const server = await startMockServer((_req, res) => {
+      sseHeaders(res);
+      res.end(event({ candidates: [{ finishReason: 'STOP' }] }));
+    });
+    try {
+      await new GeminiProvider().ask({
+        ...baseParams,
+        baseUrl: server.baseUrl,
+        system: 'CUSTOM SYSTEM',
+        content: 'CUSTOM CONTENT',
+        onDelta: () => undefined,
+      });
+      const body = JSON.parse(server.requests[0]!.body);
+      assert.equal(body.systemInstruction.parts[0].text, 'CUSTOM SYSTEM');
+      assert.equal(body.contents[0].parts[0].text, 'CUSTOM CONTENT');
+    } finally {
+      await server.close();
+    }
+  });
+
   it('skips thought parts and joins multiple text parts', async () => {
     const server = await startMockServer((_req, res) => {
       sseHeaders(res);

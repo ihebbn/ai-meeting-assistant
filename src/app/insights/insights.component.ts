@@ -82,6 +82,10 @@ export class InsightsComponent implements OnInit {
     return !!message && /microphone|mic /i.test(message);
   }
 
+  refreshSuggestions(): void {
+    void getApi()?.refreshSuggestions?.();
+  }
+
   runAction(id: string): void {
     void getApi()?.runAction?.(id);
   }

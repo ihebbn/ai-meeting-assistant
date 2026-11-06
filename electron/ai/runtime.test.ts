@@ -228,3 +228,107 @@ describe('AiRuntime.ask', () => {
     assert.deepEqual(r.errorContext(), { model: 'dm', providerLabel: 'DeepSeek' });
   });
 });
+
+describe('AiRuntime.suggest', () => {
+  const transcript = [
+    { speaker: 'System audio', text: 'We need to reduce churn this quarter.' },
+    { speaker: 'You', text: 'What is our current ARR?' },
+  ];
+
+  it('uses the suggestion prompt at low effort and parses the reply', async () => {
+    let seen: AskParams | null = null;
+    const r = runtime({
+      settings: { aiEffort: 'high' },
+      stores: { anthropic: store('k') },
+      providers: {
+        anthropic: fakeProvider({
+          supportsEffort: true,
+          ask: async (p) => {
+            seen = p;
+            return { status: 'done', text: '- Define churn\n- Explain ARR\n' } as AskResult;
+          },
+        }),
+      },
+    });
+    assert.deepEqual(await r.suggest(transcript), ['Define churn', 'Explain ARR']);
+    assert.equal(seen!.effort, 'low');
+    assert.match(seen!.system!, /up to 4 short things/);
+    assert.ok(seen!.content!.includes('System audio: We need to reduce churn this quarter.'));
+    assert.ok(!seen!.content!.includes('<question>'));
+  });
+
+  it('returns nothing when the model declines, and keeps text when truncated', async () => {
+    const make = (result: AskResult) =>
+      runtime({
+        stores: { anthropic: store('k') },
+        providers: { anthropic: fakeProvider({ ask: async () => result }) },
+      });
+    assert.deepEqual(
+      await make({ status: 'refused', text: 'Define churn', category: null, explanation: null }).suggest(transcript),
+      [],
+    );
+    assert.deepEqual(await make({ status: 'truncated', text: 'Define churn\nExplain A' }).suggest(transcript), [
+      'Define churn',
+      'Explain A',
+    ]);
+  });
+
+  it('requires a model for providers without a default', async () => {
+    const r = runtime({ settings: { aiProvider: 'groq' }, stores: { groq: store('k') } });
+    await assert.rejects(r.suggest(transcript), /Pick a model for Groq/);
+  });
+
+  it('does not cancel an answer in flight, and a newer suggestion supersedes an older one', async () => {
+    const signals: Array<{ kind: string; signal: AbortSignal }> = [];
+    const r = runtime({
+      stores: { anthropic: store('k') },
+      providers: {
+        anthropic: fakeProvider({
+          ask: (p) =>
+            new Promise<AskResult>((resolve) => {
+              signals.push({ kind: p.system ? 'suggest' : 'answer', signal: p.signal! });
+              p.signal!.addEventListener('abort', () => resolve({ status: 'cancelled', text: '' }));
+              if (signals.length === 3) {
+                resolve({ status: 'done', text: 'Define churn' });
+              }
+            }),
+        }),
+      },
+    });
+    const answer = r.ask({ question: 'q', transcript, onDelta: () => undefined });
+    const first = r.suggest(transcript);
+    const second = r.suggest(transcript);
+    assert.equal(signals[0]!.signal.aborted, false); // the answer
+    assert.equal(signals[1]!.signal.aborted, true); // superseded suggestion
+    assert.equal(signals[2]!.signal.aborted, false);
+    assert.deepEqual(await first, []);
+    assert.deepEqual(await second, ['Define churn']);
+    r.cancel();
+    assert.equal((await answer).status, 'cancelled');
+  });
+
+  it('cancelSuggestions aborts a pending suggestion', async () => {
+    let signal: AbortSignal | undefined;
+    const r = runtime({
+      stores: { anthropic: store('k') },
+      providers: {
+        anthropic: fakeProvider({
+          ask: (p) =>
+            new Promise<AskResult>((resolve) => {
+              signal = p.signal;
+              p.signal!.addEventListener('abort', () => resolve({ status: 'cancelled', text: '' }));
+            }),
+        }),
+      },
+    });
+    const pending = r.suggest(transcript);
+    r.cancelSuggestions();
+    assert.equal(signal!.aborted, true);
+    assert.deepEqual(await pending, []);
+  });
+
+  it('exposes the auto-suggest setting in state', () => {
+    assert.equal(runtime({}).getState().autoSuggest, false);
+    assert.equal(runtime({ settings: { aiAutoSuggest: true } }).getState().autoSuggest, true);
+  });
+});

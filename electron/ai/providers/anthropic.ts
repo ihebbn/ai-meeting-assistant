@@ -85,9 +85,12 @@ export class AnthropicProvider implements AiProvider {
     const params: Anthropic.MessageStreamParams = {
       model: options.model,
       max_tokens: MAX_OUTPUT_TOKENS,
-      system: SYSTEM_PROMPT,
+      system: options.system ?? SYSTEM_PROMPT,
       messages: [
-        { role: 'user', content: buildUserContent(options.question, options.transcript) },
+        {
+          role: 'user',
+          content: options.content ?? buildUserContent(options.question, options.transcript),
+        },
       ],
       // Only send effort where the model is known to support it (older models reject it).
       // `thinking` is intentionally omitted: it is the safe default across current models.

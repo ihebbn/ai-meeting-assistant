@@ -133,6 +133,13 @@ export class DiagnosticsComponent implements OnInit, OnDestroy {
     }
   }
 
+  async onAutoSuggestChange(event: Event): Promise<void> {
+    const state = await getApi()?.setAiAutoSuggest?.((event.target as HTMLInputElement).checked);
+    if (state) {
+      this.ai.set(state);
+    }
+  }
+
   async onModelChange(event: Event): Promise<void> {
     const state = await getApi()?.setAiModel?.((event.target as HTMLInputElement).value);
     if (state) {
