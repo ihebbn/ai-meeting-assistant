@@ -10,8 +10,15 @@
     "skipLibCheck": true,
     "resolveJsonModule": true,
     "sourceMap": true,
-    "types": ["node"]
+    "types": [
+      "node"
+    ]
   },
-  "include": ["electron/**/*.ts"],
-  "exclude": ["electron/**/*.test.ts"]
+  "include": [
+    "electron/**/*.ts"
+  ],
+  "exclude": [
+    "electron/**/*.test.ts",
+    "electron/**/*.test-helper.ts"
+  ]
 }

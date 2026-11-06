@@ -14,6 +14,125 @@
     </div>
   </header>
 
+  @if (ai(); as state) {
+    <section class="cards">
+      <article class="ai-card">
+        <h2>Ask AI</h2>
+
+        <div class="ai-row">
+          <label for="ai-provider">Provider</label>
+          <select id="ai-provider" (change)="onProviderChange($event)">
+            @for (p of state.providers; track p.id) {
+              <option [value]="p.id" [selected]="p.id === state.provider">
+                {{ p.label }}{{ p.experimental ? ' (experimental)' : '' }}
+              </option>
+            }
+          </select>
+        </div>
+
+        <ul>
+          <li>
+            <span>API key</span>
+            <strong [class.ok]="state.configured" [class.bad]="!state.configured">
+              @if (state.keySource === 'stored') {
+                Stored (encrypted)
+              } @else if (state.keySource === 'env') {
+                From environment variable
+              } @else if (state.configured) {
+                None (not required for this endpoint)
+              } @else {
+                Not configured — Ask AI shows sample answers
+              }
+            </strong>
+          </li>
+        </ul>
+
+        @if (state.canStoreKey) {
+          <div class="ai-row">
+            <label for="ai-key">{{ state.providerLabel }} API key</label>
+            <input
+              #keyInput
+              id="ai-key"
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              placeholder="Paste key"
+              (keydown.enter)="saveKey(keyInput)"
+            />
+            <button type="button" [disabled]="aiBusy()" (click)="saveKey(keyInput)">Save key</button>
+            @if (state.keySource === 'stored') {
+              <button type="button" class="danger" (click)="clearKey()">Remove</button>
+            }
+          </div>
+        } @else {
+          <p class="note">
+            Secure storage is not available on this system, so a pasted key cannot be saved. Set the
+            provider's API key environment variable and restart the app.
+          </p>
+        }
+
+        @if (state.baseUrlEditable) {
+          <div class="ai-row">
+            <label for="ai-base-url">Base URL</label>
+            <input
+              #baseUrlInput
+              id="ai-base-url"
+              type="url"
+              spellcheck="false"
+              placeholder="https://api.example.com/v1"
+              [value]="state.baseUrl ?? ''"
+              (keydown.enter)="saveBaseUrl(baseUrlInput)"
+            />
+            <button type="button" (click)="saveBaseUrl(baseUrlInput)">Save URL</button>
+          </div>
+        }
+
+        @if (state.configured) {
+          <div class="ai-row">
+            <label for="ai-model">Model</label>
+            <input
+              id="ai-model"
+              type="text"
+              list="ai-model-list"
+              spellcheck="false"
+              placeholder="Type or pick a model id"
+              [value]="state.model"
+              (change)="onModelChange($event)"
+            />
+            <datalist id="ai-model-list">
+              @for (model of aiModels(); track model.id) {
+                <option [value]="model.id">{{ model.displayName }}</option>
+              }
+            </datalist>
+            <button type="button" [disabled]="aiBusy()" (click)="loadModels()">Refresh models</button>
+          </div>
+          @if (state.supportsEffort) {
+            <div class="ai-row">
+              <label for="ai-effort">Reasoning effort</label>
+              <select id="ai-effort" (change)="onEffortChange($event)">
+                <option value="low" [selected]="state.effort === 'low'">Low (fastest)</option>
+                <option value="medium" [selected]="state.effort === 'medium'">Medium</option>
+                <option value="high" [selected]="state.effort === 'high'">High</option>
+              </select>
+            </div>
+          }
+          <p class="note">
+            Your question and the recent live transcript are sent to {{ state.providerLabel }}. Type any
+            model id, or pick one from the provider's list.
+          </p>
+        }
+
+        @if (state.note) {
+          <p class="note">{{ state.note }}</p>
+        }
+
+        @if (aiMessage(); as message) {
+          <p class="note" role="status">{{ message }}</p>
+        }
+      </article>
+    </section>
+  }
+
   @if (snapshot(); as snap) {
     <section class="cards">
       <article>

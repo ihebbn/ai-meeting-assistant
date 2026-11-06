@@ -25,7 +25,7 @@ Do this in a real Meet/Teams call **before** connecting Ask AI to the live trans
 | Speak → **You** activity meter moves and transcript line labeled You | Pending (operator — speak with headphones in a call) |
 | Remote participant / call audio → **Sys** meter moves and line labeled System audio | Pass (local 2026-11-05 — loopback transcribed system playback) |
 | Stop releases both streams and discards stale in-flight ASR | Pass (local code path 2026-11-05; re-confirm in call) |
-| Ask AI still sample-only (not yet wired to transcript) | Pass |
+| Ask AI answers from the live transcript with the selected provider when a key is configured; labelled sample answers otherwise | Pending (operator: needs a real key per provider and a call) |
 
 ## Qwen3-ASR Windows acceptance (required before making Qwen the production default)
 

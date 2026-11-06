@@ -80,6 +80,30 @@ export type SessionView = {
   contentProtection: boolean;
 };
 
+export type AiEffort = 'low' | 'medium' | 'high';
+
+export type AiProviderSummary = { id: string; label: string; experimental: boolean };
+
+export type AiState = {
+  providers: AiProviderSummary[];
+  provider: string;
+  providerLabel: string;
+  note: string | null;
+  experimental: boolean;
+  /** Ask AI can call the provider (a key is available, or none is needed). The key itself is never sent to the UI. */
+  configured: boolean;
+  keySource: 'stored' | 'env' | null;
+  canStoreKey: boolean;
+  model: string;
+  effort: AiEffort;
+  supportsEffort: boolean;
+  baseUrl: string | null;
+  baseUrlEditable: boolean;
+  error?: string | null;
+};
+
+export type AiModelInfo = { id: string; displayName: string };
+
 export type ProtectionState = {
   requested: boolean;
   applied: boolean;
@@ -142,6 +166,14 @@ export type MeetingCopilotApi = {
   openDiagnostics?: () => Promise<boolean>;
   openMicSettings?: () => Promise<boolean>;
   openLogFolder?: () => Promise<string>;
+  getAiState?: () => Promise<AiState>;
+  setAiProvider?: (providerId: string) => Promise<AiState>;
+  setAiBaseUrl?: (baseUrl: string) => Promise<AiState>;
+  setAiApiKey?: (apiKey: string) => Promise<AiState>;
+  clearAiApiKey?: () => Promise<AiState>;
+  listAiModels?: () => Promise<{ models: AiModelInfo[]; error: string | null }>;
+  setAiModel?: (model: string) => Promise<AiState>;
+  setAiEffort?: (effort: AiEffort) => Promise<AiState>;
   onLog?: (callback: (entry: LogEntry) => void) => () => void;
   enableLoopbackAudio?: () => Promise<void>;
   disableLoopbackAudio?: () => Promise<void>;

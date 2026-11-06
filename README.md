@@ -1,6 +1,6 @@
 # Windows Meeting Copilot — Milestone 1
 
-One protected, movable, resizable frosted-glass overlay for Google Meet and Microsoft Teams. Live dual-source transcription (microphone + Windows system audio) with local ASR. Ask AI still uses sample answers until dual-source capture is verified with headphones in a real call.
+One protected, movable, resizable frosted-glass overlay for Google Meet and Microsoft Teams. Live dual-source transcription (microphone + Windows system audio) with local ASR. Ask AI answers with the cloud provider and model you choose in Settings, grounded on the live transcript (sample answers are shown, clearly labelled, when no API key is configured).
 
 ## Unified overlay
 
@@ -115,3 +115,33 @@ npm run bench -- bench/manifest.example.json --backend both --out bench-report.j
 - **Scoring:** reference and output are normalised the same way (case, punctuation, Arabic diacritics and alef variants) before comparison. WER can exceed 100% when the model inserts many words. Failed decodes are excluded from the rates and counted in the `fail` column; the process exits with code 2 if any failed.
 - **Latency:** decode time only. It excludes the 420 ms end-of-speech wait and the IPC hop, so on-screen latency in the app is higher.
 - **Models:** the first Qwen run downloads about 1 GB into the app's `asr-models` folder, the same one the app uses.
+
+## Ask AI
+
+Ask AI streams an answer from a cloud model you choose into the AI Response panel, using the recent transcript (about 12,000 characters, newest kept) as context. No local models.
+
+### Providers
+
+| Provider | Protocol | Status |
+| --- | --- | --- |
+| Anthropic (Claude) | Official Anthropic SDK | Checked against the real SDK with a mock server; no live key tested |
+| OpenAI | Chat Completions over HTTP | Request sent is `model`, `messages`, `stream` only. Whether the newest OpenAI models accept it is **unverified** |
+| Mistral, Groq, OpenRouter, DeepSeek, Together AI | OpenAI-compatible Chat Completions | Endpoints and SSE format taken from each provider's docs; no live key tested. Together documents no `[DONE]` marker, so the stream closing ends the answer |
+| Google (Gemini) | Native `streamGenerateContent` | **Experimental**: stream chunk shape, error body and header auth could not be confirmed without a key |
+| xAI (Grok) | OpenAI-compatible | **Experimental**: the docs read only describe the Responses API |
+| Custom | OpenAI-compatible | You supply the base URL (https only; plain http is allowed for localhost) |
+
+Provider facts were read from official docs on 2026-11-06. Recheck them before relying on a provider; the catalogue is `electron/ai/registry.ts`.
+
+### Setup
+
+- Open **⋮ → Settings → Ask AI**, pick a provider, paste its API key and press *Save key*. The key is encrypted with the OS secure store (Electron `safeStorage`, DPAPI on Windows), kept **per provider**, and never shown again or sent to the UI. If secure storage is unavailable the key is not saved; set the provider's environment variable instead (`ANTHROPIC_API_KEY`, `OPENAI_API_KEY`, `MISTRAL_API_KEY`, `GROQ_API_KEY`, `OPENROUTER_API_KEY`, `DEEPSEEK_API_KEY`, `TOGETHER_API_KEY`, `XAI_API_KEY`, `GOOGLE_API_KEY` or `GEMINI_API_KEY`). A stored key wins over the environment.
+- **Model:** the field accepts any model id; the suggestions come from the provider's own models endpoint, so they never go stale. Anthropic defaults to `claude-opus-5-5`; other providers have no default and you must pick one. The choice is remembered per provider in `settings.json` (`aiModels`).
+- **Reasoning effort** (`aiEffort`) is shown only for Anthropic, and only sent to models that report effort support. Other providers use their defaults, and no token limit is sent to them.
+
+### Safety, privacy and cost
+
+- **Your data goes to the selected provider:** each question sends the question and the recent transcript window to that provider and is billed to your key. A lower-cost model reduces cost and latency.
+- **Prompt injection:** the transcript is passed as untrusted data inside `<transcript>` tags and the system prompt tells the model never to follow instructions found in it, because anyone on the call can speak them. Tag-like text is neutralised. This reduces, but does not eliminate, the risk.
+- **Refusals and limits:** a declined request or an answer cut at the output limit is shown with a note. Anthropic server-side refusal fallbacks are **not** enabled.
+- **Cancel:** a new question, closing the AI panel, or quitting cancels the request in flight.

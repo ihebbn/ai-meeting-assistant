@@ -108,7 +108,7 @@ export function createInitialSession(): SessionState {
     recap: [
       'Press Listen to capture your microphone (You) and Windows system audio.',
       'Language defaults to Auto — English, French, and Arabic segments are detected per phrase.',
-      'Switch Qwen / Whisper in Live Insights for side-by-side testing. Ask AI stays sample-only until dual-source capture is verified.',
+      'Switch Qwen / Whisper in Live Insights for side-by-side testing. Pick an AI provider and add its API key in Settings (⋮ menu) to get real Ask AI answers grounded on the live transcript; without one, Ask AI shows labelled sample answers.',
     ],
     actions: [
       { id: 'define', label: 'Define startup acquisition', icon: 'book' },

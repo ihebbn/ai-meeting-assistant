@@ -4,6 +4,7 @@ import {
   clipboard,
   globalShortcut,
   ipcMain,
+  safeStorage,
   screen,
   session as electronSession,
   shell,
@@ -48,6 +49,14 @@ import {
   type TranscriptResult,
 } from './transcriber';
 import type { AsrBackendId, AsrLanguageId } from './session';
+import { normalizeBaseUrl } from './ai/base-url';
+import { type KeyCipher, createCredentialStore } from './ai/credentials';
+import { describeAiError } from './ai/errors';
+import { AnthropicProvider } from './ai/providers/anthropic';
+import { GeminiProvider } from './ai/providers/gemini';
+import { OpenAiCompatibleProvider } from './ai/providers/openai-compatible';
+import { PROVIDERS, getProvider } from './ai/registry';
+import { AiRuntime } from './ai/runtime';
 import { toFloat32Pcm } from './pcm';
 import { getSettings, initSettings, updateSettings } from './settings';
 
@@ -99,6 +108,38 @@ let contentProtection: ProtectionState = {
 };
 const logEntries: LogEntry[] = [];
 let logFilePath = '';
+/** Encrypts the API key with the OS store (DPAPI on Windows); refuses weak Linux fallback. */
+const safeStorageCipher: KeyCipher = {
+  isAvailable: () =>
+    safeStorage.isEncryptionAvailable() &&
+    !(
+      process.platform === 'linux' &&
+      typeof safeStorage.getSelectedStorageBackend === 'function' &&
+      safeStorage.getSelectedStorageBackend() === 'basic_text'
+    ),
+  encrypt: (plain) => safeStorage.encryptString(plain),
+  decrypt: (data) => safeStorage.decryptString(data),
+};
+
+const credentialStores = new Map<string, ReturnType<typeof createCredentialStore>>();
+const aiRuntime = new AiRuntime({
+  providers: {
+    anthropic: new AnthropicProvider(),
+    'openai-compatible': new OpenAiCompatibleProvider(),
+    gemini: new GeminiProvider(),
+  },
+  credentials: (providerId) => {
+    let store = credentialStores.get(providerId);
+    if (!store) {
+      store = createCredentialStore(app.getPath('userData'), safeStorageCipher, providerId);
+      credentialStores.set(providerId, store);
+    }
+    return store;
+  },
+  settings: getSettings,
+  env: process.env,
+});
+
 let elapsedTimer: NodeJS.Timeout | null = null;
 let streamTimer: NodeJS.Timeout | null = null;
 let streamToken = 0;
@@ -731,6 +772,7 @@ function stopElapsedTimer(): void {
 }
 
 function stopStreaming(): void {
+  aiRuntime.cancel();
   streamToken += 1;
   if (streamTimer) {
     clearInterval(streamTimer);
@@ -778,7 +820,96 @@ function askWithPrompt(prompt: string, actionId?: string): void {
   }
   session.followUpDraft = '';
   appendLog('info', `Ask AI: ${trimmed}`);
-  streamAnswer(trimmed, answerForPrompt(trimmed, actionId));
+  if (aiRuntime.isConfigured()) {
+    void streamLiveAnswer(trimmed);
+    return;
+  }
+  streamAnswer(
+    trimmed,
+    `[Sample answer. No API key is configured: add one in Settings to get real answers.]\n\n${answerForPrompt(trimmed, actionId)}`,
+  );
+}
+
+/** Streams a real model answer, grounded on the live transcript, into the AI panel. */
+async function streamLiveAnswer(question: string): Promise<void> {
+  stopStreaming();
+  const token = ++streamToken;
+  const assistantId = `a-${Date.now()}`;
+  session.currentQuestion = question;
+  session.messages = [
+    { id: `u-${Date.now()}`, role: 'user', text: question },
+    { id: assistantId, role: 'assistant', text: '', streaming: true },
+  ];
+  session.responseOpen = true;
+  session.panelsHidden = false;
+  applyVisibility();
+
+  let text = '';
+  let lastBroadcast = 0;
+  let pending: NodeJS.Timeout | null = null;
+  const show = (body: string, streaming: boolean): void => {
+    if (token !== streamToken) {
+      return;
+    }
+    session.messages = session.messages.map((m) =>
+      m.id === assistantId ? { ...m, text: body, streaming } : m,
+    );
+    broadcastSession();
+  };
+  const flush = (): void => {
+    pending = null;
+    lastBroadcast = Date.now();
+    show(text, true);
+  };
+
+  try {
+    const result = await aiRuntime.ask({
+      question,
+      transcript: session.transcript.map(({ speaker, text: line }) => ({ speaker, text: line })),
+      onDelta: (delta: string) => {
+        if (token !== streamToken) {
+          return;
+        }
+        text += delta;
+        // Coalesce updates: broadcasting the whole session per token is wasteful.
+        const wait = 50 - (Date.now() - lastBroadcast);
+        if (wait <= 0) {
+          flush();
+        } else if (!pending) {
+          pending = setTimeout(flush, wait);
+        }
+      },
+    });
+    if (pending) {
+      clearTimeout(pending);
+      pending = null;
+    }
+    switch (result.status) {
+      case 'done':
+        show(result.text, false);
+        break;
+      case 'truncated':
+        show(`${result.text}\n\n[The answer was cut off at the output limit.]`, false);
+        break;
+      case 'refused':
+        show(
+          `${result.text ? `${result.text}\n\n` : ''}[The model declined this request${result.category ? ` (${result.category})` : ''}.]`,
+          false,
+        );
+        break;
+      case 'cancelled':
+        show(result.text, false);
+        break;
+    }
+  } catch (err) {
+    if (pending) {
+      clearTimeout(pending);
+      pending = null;
+    }
+    const message = describeAiError(err, aiRuntime.errorContext());
+    appendLog('warn', `Ask AI failed: ${message}`);
+    show(message, false);
+  }
 }
 
 function setPanelOpen(panel: 'insights' | 'response', open: boolean): void {
@@ -1167,6 +1298,87 @@ function registerIpc(): void {
       await shell.showItemInFolder(logFilePath);
     }
     return logFilePath;
+  });
+
+  ipcMain.handle('ai:get-state', () => aiRuntime.getState());
+
+  ipcMain.handle('ai:set-provider', (_e, providerId: string) => {
+    // Only accept ids from the registry; getProvider falls back to the first entry otherwise.
+    const known = PROVIDERS.some((p) => p.id === providerId);
+    if (known) {
+      updateSettings({ aiProvider: providerId });
+      appendLog('info', `Ask AI provider set to ${getProvider(providerId).label}`);
+    }
+    return aiRuntime.getState();
+  });
+
+  ipcMain.handle('ai:set-api-key', (_e, apiKey: string) => {
+    try {
+      aiRuntime.saveKey(String(apiKey ?? ''));
+      appendLog('info', `API key saved to secure storage for ${aiRuntime.active().label}.`);
+      return { ...aiRuntime.getState(), error: null as string | null };
+    } catch (err) {
+      return {
+        ...aiRuntime.getState(),
+        error: err instanceof Error ? err.message : String(err),
+      };
+    }
+  });
+
+  ipcMain.handle('ai:clear-api-key', () => {
+    aiRuntime.clearKey();
+    appendLog('info', `API key removed for ${aiRuntime.active().label}.`);
+    return aiRuntime.getState();
+  });
+
+  ipcMain.handle('ai:list-models', async () => {
+    try {
+      return { models: await aiRuntime.listModels(), error: null as string | null };
+    } catch (err) {
+      return { models: [], error: describeAiError(err, aiRuntime.errorContext()) };
+    }
+  });
+
+  ipcMain.handle('ai:set-model', (_e, model: string) => {
+    const def = aiRuntime.active();
+    const value = String(model ?? '').trim();
+    const models = { ...getSettings().aiModels };
+    if (value) {
+      models[def.id] = value;
+    } else {
+      delete models[def.id];
+    }
+    updateSettings({ aiModels: models });
+    appendLog('info', `Ask AI model for ${def.label} set to ${aiRuntime.model(def) || '(none)'}`);
+    return aiRuntime.getState();
+  });
+
+  ipcMain.handle('ai:set-base-url', (_e, baseUrl: string) => {
+    const def = aiRuntime.active();
+    if (!def.baseUrlEditable) {
+      return { ...aiRuntime.getState(), error: 'This provider has a fixed base URL.' };
+    }
+    const raw = String(baseUrl ?? '').trim();
+    const urls = { ...getSettings().aiBaseUrls };
+    if (!raw) {
+      delete urls[def.id];
+    } else {
+      const normalized = normalizeBaseUrl(raw);
+      if (!normalized) {
+        return {
+          ...aiRuntime.getState(),
+          error: 'Use an https:// URL (plain http is only allowed for localhost) without credentials in it.',
+        };
+      }
+      urls[def.id] = normalized;
+    }
+    updateSettings({ aiBaseUrls: urls });
+    return { ...aiRuntime.getState(), error: null as string | null };
+  });
+
+  ipcMain.handle('ai:set-effort', (_e, effort: string) => {
+    updateSettings({ aiEffort: effort as 'low' | 'medium' | 'high' });
+    return aiRuntime.getState();
   });
 
   ipcMain.handle('settings:set-content-protection', (_e, enabled: boolean) => {
