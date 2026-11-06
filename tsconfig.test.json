@@ -2,8 +2,9 @@
   "extends": "./tsconfig.electron.json",
   "compilerOptions": {
     "outDir": "dist-test",
+    "rootDir": ".",
     "sourceMap": false
   },
-  "include": ["electron/**/*.ts"],
+  "include": ["electron/**/*.ts", "src/app/audio/segmenter*.ts"],
   "exclude": []
 }

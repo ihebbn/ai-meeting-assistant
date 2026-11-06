@@ -163,6 +163,8 @@ async function ensureWorker(): Promise<void> {
         ELECTRON_RUN_AS_NODE: '1',
       },
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      // Structured clone lets us send Float32Array instead of JSON number arrays.
+      serialization: 'advanced',
     });
     child = proc;
     attachChildHandlers(proc);
@@ -247,7 +249,7 @@ export async function transcribeWithQwen(
     id,
     sampleRate,
     languageHint,
-    pcm: Array.from(pcm),
+    pcm,
   });
 
   return withTimeout(resultPromise, 45_000, 'Qwen transcription timed out.');

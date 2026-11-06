@@ -15,7 +15,8 @@
     "package:win": "npm run build && electron-builder --win --x64",
     "typecheck": "tsc -p tsconfig.electron.json --noEmit && ng build --configuration=development",
     "test": "tsc -p tsconfig.test.json && node --test \"dist-test/**/*.test.js\"",
-    "bench": "npm run build:electron && node scripts/run-electron.js dist-electron/bench/cli.js"
+    "bench": "npm run build:electron && node scripts/run-electron.js dist-electron/bench/cli.js",
+    "pretest": "node -e \"require('fs').rmSync('dist-test',{recursive:true,force:true})\""
   },
   "build": {
     "appId": "com.meetingcopilot.overlay",

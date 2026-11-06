@@ -1,21 +1,16 @@
 import { Injectable, OnDestroy, effect, inject } from '@angular/core';
 import { getApi } from '../electron-api';
 import { SessionService } from '../session.service';
+import { DEFAULT_SEGMENTER_CONFIG, SpeechSegmenter } from './segmenter';
 
 type SourceName = 'you' | 'system';
 
 const TARGET_RATE = 16000;
-/** Short phrase windows — long noisy buffers make Whisper invent words or go blank. */
-const MAX_UTTERANCE_SEC = 5.5;
-const OVERLAP_SEC = 0.45;
 const PAD_UTTERANCE_SEC = 0.35;
-const MIN_UTTERANCE_SEC = 0.35;
-const SILENCE_FLUSH_MS = 420;
 const LEVEL_PUSH_MS = 80;
 const SPEECH_RMS = 0.005;
 const SILENCE_RMS = 0.0025;
 const MIC_LIVE_RMS = 0.008;
-const MIN_SPEECH_RATIO = 0.14;
 const MAX_QUEUED_UTTERANCES = 3;
 
 class SourceCapture {
@@ -25,17 +20,25 @@ class SourceCapture {
   sourceNode: MediaStreamAudioSourceNode | null = null;
   processor: ScriptProcessorNode | null = null;
   monitor: HTMLAudioElement | null = null;
-  readonly samples: number[] = [];
   readonly queue: Float32Array[] = [];
-  speaking = false;
-  silentSince = 0;
+  readonly segmenter: SpeechSegmenter;
   level = 0;
   active = false;
   draining = false;
   generation = 0;
   peakRms = 0;
 
-  constructor(readonly name: SourceName) {}
+  constructor(readonly name: SourceName) {
+    this.segmenter = new SpeechSegmenter(
+      {
+        ...DEFAULT_SEGMENTER_CONFIG,
+        // The mic is gated slightly lower than loopback audio.
+        gate: name === 'you' ? SPEECH_RMS * 0.75 : SPEECH_RMS,
+      },
+      (ratio) =>
+        console.info(`[listen] skip ${name} — low speech ratio (${ratio.toFixed(2)})`),
+    );
+  }
 }
 
 @Injectable({ providedIn: 'root' })
@@ -397,9 +400,8 @@ export class ListeningService implements OnDestroy {
       }
       capture.stream = null;
     }
-    capture.samples.length = 0;
+    capture.segmenter.reset();
     capture.queue.length = 0;
-    capture.speaking = false;
     capture.level = 0;
     capture.active = false;
     capture.draining = false;
@@ -425,7 +427,7 @@ export class ListeningService implements OnDestroy {
       if (now - this.lastMicDiag > 2000) {
         this.lastMicDiag = now;
         console.info(
-          `[listen] mic “${this.micLabel}” peak=${this.mic.peakRms.toFixed(4)} level=${this.mic.level.toFixed(2)} speaking=${this.mic.speaking} samples=${this.mic.samples.length}`,
+          `[listen] mic “${this.micLabel}” peak=${this.mic.peakRms.toFixed(4)} level=${this.mic.level.toFixed(2)} speaking=${this.mic.segmenter.isSpeaking} samples=${this.mic.segmenter.bufferedSamples}`,
         );
         if (this.mic.peakRms >= MIC_LIVE_RMS || this.mic.active) {
           if (this.sessions.session()?.listenError) {
@@ -498,63 +500,13 @@ export class ListeningService implements OnDestroy {
         ? Math.min(1.5, 0.18 / peak)
         : 1;
     const down = downsampleTo16k(input, sampleRate, boost);
-    const now = performance.now();
-    const gate = capture.name === 'you' ? SPEECH_RMS * 0.75 : SPEECH_RMS;
-
-    // Cap live buffer so we never pile up 20s of noise behind a slow ASR call.
-    const hardCap = Math.floor(TARGET_RATE * (MAX_UTTERANCE_SEC + OVERLAP_SEC + 1));
-    if (capture.samples.length > hardCap) {
-      capture.samples.splice(0, capture.samples.length - hardCap);
-    }
-
-    if (rms >= gate) {
-      capture.speaking = true;
-      capture.silentSince = 0;
-      appendSamples(capture.samples, down);
-    } else if (capture.speaking) {
-      appendSamples(capture.samples, down);
-      if (!capture.silentSince) {
-        capture.silentSince = now;
-      }
-      if (now - capture.silentSince >= SILENCE_FLUSH_MS) {
-        this.enqueueUtterance(capture, false);
-      }
-    }
-
-    const maxSamples = Math.floor(TARGET_RATE * MAX_UTTERANCE_SEC);
-    if (capture.samples.length >= maxSamples) {
-      this.enqueueUtterance(capture, true);
+    const utterance = capture.segmenter.push(down, rms, performance.now());
+    if (utterance) {
+      this.enqueueUtterance(capture, utterance);
     }
   }
 
-  private enqueueUtterance(capture: SourceCapture, hitMaxLength: boolean): void {
-    const minSamples = Math.floor(TARGET_RATE * MIN_UTTERANCE_SEC);
-    if (capture.samples.length < minSamples) {
-      capture.samples.length = 0;
-      capture.speaking = false;
-      capture.silentSince = 0;
-      return;
-    }
-
-    const overlap = Math.floor(TARGET_RATE * OVERLAP_SEC);
-    const chunk = Float32Array.from(capture.samples);
-    if (hitMaxLength && chunk.length > overlap * 2) {
-      capture.samples.splice(0, capture.samples.length - overlap);
-      capture.speaking = true;
-      capture.silentSince = 0;
-    } else {
-      capture.samples.length = 0;
-      capture.speaking = false;
-      capture.silentSince = 0;
-    }
-
-    if (speechRatio(chunk) < MIN_SPEECH_RATIO) {
-      console.info(
-        `[listen] skip ${capture.name} — low speech ratio (${speechRatio(chunk).toFixed(2)})`,
-      );
-      return;
-    }
-
+  private enqueueUtterance(capture: SourceCapture, chunk: Float32Array): void {
     capture.queue.push(chunk);
     while (capture.queue.length > MAX_QUEUED_UTTERANCES) {
       capture.queue.shift();
@@ -588,7 +540,7 @@ export class ListeningService implements OnDestroy {
           const raw = await api?.transcribePcm?.({
             source: capture.name,
             sampleRate: TARGET_RATE,
-            pcm: Array.from(pcm),
+            pcm,
           });
           if (generation !== capture.generation) {
             return;
@@ -720,12 +672,6 @@ function sleep(ms: number): Promise<void> {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-function appendSamples(target: number[], next: Float32Array): void {
-  for (let i = 0; i < next.length; i += 1) {
-    target.push(next[i]!);
-  }
-}
-
 function padPcm(pcm: Float32Array, sampleRate: number, minSec: number): Float32Array {
   const minSamples = Math.floor(sampleRate * minSec);
   if (pcm.length >= minSamples) {
@@ -734,27 +680,6 @@ function padPcm(pcm: Float32Array, sampleRate: number, minSec: number): Float32A
   const out = new Float32Array(minSamples);
   out.set(pcm, 0);
   return out;
-}
-
-function speechRatio(pcm: Float32Array): number {
-  const frame = 512;
-  if (pcm.length < frame) {
-    return 0;
-  }
-  let speech = 0;
-  let total = 0;
-  for (let i = 0; i + frame <= pcm.length; i += frame) {
-    let sum = 0;
-    for (let j = 0; j < frame; j += 1) {
-      const s = pcm[i + j]!;
-      sum += s * s;
-    }
-    total += 1;
-    if (Math.sqrt(sum / frame) >= SPEECH_RMS) {
-      speech += 1;
-    }
-  }
-  return total ? speech / total : 0;
 }
 
 function normalizeTranscriptResults(

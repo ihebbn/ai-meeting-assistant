@@ -15,7 +15,7 @@ type TranscribeMessage = {
   id: number;
   sampleRate: number;
   languageHint: string | null;
-  pcm: number[];
+  pcm: Float32Array;
 };
 
 type CancelMessage = {
@@ -130,7 +130,7 @@ async function drainQueue(): Promise<void> {
       }
       const started = Date.now();
       try {
-        const pcm = Float32Array.from(job.pcm);
+        const pcm = job.pcm instanceof Float32Array ? job.pcm : Float32Array.from(job.pcm);
         const stream = recognizer.createStream();
         if (job.languageHint && stream.setOption) {
           stream.setOption('language', job.languageHint);

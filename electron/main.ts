@@ -48,6 +48,7 @@ import {
   type TranscriptResult,
 } from './transcriber';
 import type { AsrBackendId, AsrLanguageId } from './session';
+import { toFloat32Pcm } from './pcm';
 import { getSettings, initSettings, updateSettings } from './settings';
 
 const isDev = process.env['ELECTRON_DEV'] === '1';
@@ -1010,13 +1011,9 @@ function registerIpc(): void {
     'listen:transcribe-pcm',
     async (
       _e,
-      payload: { source: 'you' | 'system'; sampleRate: number; pcm: number[] },
+      payload: { source: 'you' | 'system'; sampleRate: number; pcm: Float32Array | number[] },
     ) => {
-      const values = payload?.pcm ?? [];
-      const pcm = new Float32Array(values.length);
-      for (let i = 0; i < values.length; i += 1) {
-        pcm[i] = Number(values[i]) || 0;
-      }
+      const pcm = toFloat32Pcm(payload?.pcm);
       const sampleRate = Number(payload?.sampleRate) || 16000;
       if (!pcm.length) {
         return emptyTranscriptResult();

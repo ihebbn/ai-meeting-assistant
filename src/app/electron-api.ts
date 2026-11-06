@@ -173,7 +173,7 @@ export type MeetingCopilotApi = {
   transcribePcm?: (payload: {
     source: 'you' | 'system';
     sampleRate: number;
-    pcm: number[];
+    pcm: Float32Array;
   }) => Promise<TranscriptResult | string>;
 };
 
