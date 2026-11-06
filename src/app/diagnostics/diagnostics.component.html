@@ -152,7 +152,7 @@
       <article>
         <h2>Runtime</h2>
         <ul>
-          <li><span>Windows build</span><strong>{{ snap.windowsBuild }}</strong></li>
+          <li><span>OS build</span><strong>{{ snap.osBuild }}</strong></li>
           <li><span>Electron</span><strong>{{ snap.electronVersion }}</strong></li>
           <li><span>Chrome</span><strong>{{ snap.chromeVersion }}</strong></li>
           <li><span>App</span><strong>{{ snap.appVersion }}</strong></li>
@@ -162,6 +162,12 @@
       <article>
         <h2>Content protection (Electron API)</h2>
         <ul>
+          @if (!snap.contentProtection.supported) {
+            <li>
+              <span>Platform support</span>
+              <strong class="bad">Not available on {{ snap.session.platformLabel }} — the overlay can appear in screen shares</strong>
+            </li>
+          }
           @if (snap.contentProtection.enabledForDesignCapture) {
             <li>
               <span>Design capture mode</span>

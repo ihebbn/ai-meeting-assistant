@@ -1,6 +1,6 @@
-# Windows Meeting Copilot — Milestone 1
+# Meeting Copilot — Milestone 1
 
-One protected, movable, resizable frosted-glass overlay for Google Meet and Microsoft Teams. Live dual-source transcription (microphone + Windows system audio) with local ASR. Ask AI answers with the cloud provider and model you choose in Settings, grounded on the live transcript (without a configured provider it tells you how to set one up).
+One movable, resizable frosted-glass overlay for Google Meet and Microsoft Teams, hidden from screen share on Windows (not possible on Linux, see [Platforms](#platforms)). Live dual-source transcription (microphone + system audio) with local ASR. Ask AI answers with the cloud provider and model you choose in Settings, grounded on the live transcript (without a configured provider it tells you how to set one up).
 
 ## Unified overlay
 
@@ -37,7 +37,7 @@ On first Listen with the Qwen backend selected, the app downloads:
 
 `sherpa-onnx-qwen3-asr-0.6B-int8-2026-03-25`
 
-into `%APPDATA%/meeting-copilot/asr-models/` (Electron `userData`). Progress and errors appear in Live Insights. Manual fallback:
+into `%APPDATA%/meeting-copilot/asr-models/` (Electron `userData`). Progress and errors appear in Live Insights. Manual fallback (on Linux the folder is `~/.config/meeting-copilot/asr-models/`; use the same `curl` and `tar -xjf` commands from a shell):
 
 ```powershell
 cd $env:APPDATA\meeting-copilot\asr-models
@@ -153,3 +153,24 @@ With **Hide transcript** on, Live Insights shows a **Suggestions** list. Press *
 - **Prompt injection:** the transcript is passed as untrusted data inside `<transcript>` tags and the system prompt tells the model never to follow instructions found in it, because anyone on the call can speak them. Tag-like text is neutralised. This reduces, but does not eliminate, the risk.
 - **Refusals and limits:** a declined request or an answer cut at the output limit is shown with a note. Anthropic server-side refusal fallbacks are **not** enabled.
 - **Cancel:** a new question, closing the AI panel, or quitting cancels the request in flight.
+
+## Platforms
+
+Windows and Linux are both supported targets for development and use. macOS is untested.
+
+| Capability | Windows | Linux |
+| --- | --- | --- |
+| Run (`npm run dev` / `npm start`) | Yes | Yes (checked on GNOME, Wayland, Electron 35) |
+| Hide overlay from screen share | Yes (`setContentProtection`) | **No.** Electron does nothing here; the toolbar shows a non-clickable **Visible** marker and Settings says so |
+| Global shortcuts (`Ctrl+\`, `Ctrl+Enter`) | Yes | Registered on GNOME/Wayland; other compositors unchecked |
+| Microphone + system-audio capture | Verified locally on Windows | System-audio track is obtained via the PulseAudio/PipeWire loopback; **signal not verified** (see below). The library supports "most Linux distros with PulseAudio as a sound server" |
+| Local ASR (Qwen, Whisper) | Yes | Yes (CPU) |
+| Encrypted API-key storage | DPAPI | OS keyring via `safeStorage` (libsecret checked); refuses the weak plain-text fallback, so set the provider's environment variable if no keyring is available |
+| "Open mic settings" button | Opens Windows settings | Hidden: there is no reliable deep link across desktops |
+| Packaging | `npm run package:win` | Not set up yet |
+
+Linux notes:
+
+- On Wayland, always-on-top, window positioning and transparency are controlled by the compositor and can differ from Windows; this has not been checked visually.
+- To check system audio yourself: play any audio, press **Listen**, and confirm the **Sys** meter on the toolbar moves and **System audio** lines appear. Use headphones so the microphone does not pick up the speakers.
+- If `getDisplayMedia` stalls, check that `xdg-desktop-portal` and PipeWire (`pipewire-pulse`) are running.

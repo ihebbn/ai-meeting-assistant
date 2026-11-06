@@ -65,6 +65,9 @@ export type SessionView = {
   currentQuestion: string;
   messages: AiMessage[];
   followUpDraft: string;
+  platformLabel: string;
+  contentProtectionSupported: boolean;
+  canOpenMicSettings: boolean;
   askShortcutLabel: string;
   hideShortcutLabel: string;
   audio: AudioActivity;
@@ -114,6 +117,7 @@ export type ProtectionState = {
   appliedAt: string | null;
   windows: Record<string, boolean>;
   enabledForDesignCapture: boolean;
+  supported: boolean;
 };
 
 export type LogEntry = {
@@ -127,7 +131,7 @@ export type AppSnapshot = {
   electronVersion: string;
   chromeVersion: string;
   nodeVersion: string;
-  windowsBuild: string;
+  osBuild: string;
   platform: string;
   arch: string;
   showHideShortcut: string;

@@ -26,6 +26,10 @@ export class ToolbarComponent implements OnInit {
   readonly panelsHidden = computed(() => this.session()?.panelsHidden ?? false);
   /** Overlay is protected from screen capture unless settings say otherwise. */
   readonly protectedFromCapture = computed(() => this.session()?.contentProtection ?? true);
+  readonly captureProtectionSupported = computed(
+    () => this.session()?.contentProtectionSupported ?? true,
+  );
+  readonly platformLabel = computed(() => this.session()?.platformLabel ?? '');
   readonly menuOpen = computed(() => this.session()?.menuOpen ?? false);
   readonly askLabel = computed(() => this.session()?.askShortcutLabel ?? 'Ctrl+Enter');
   readonly hideLabel = computed(() => this.session()?.hideShortcutLabel ?? 'Ctrl+\\');

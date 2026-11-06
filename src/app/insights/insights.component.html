@@ -76,9 +76,9 @@
           }
           @if (snap.listenError && snap.listenError !== snap.asrSetupMessage) {
             <p class="listen-error">{{ snap.listenError }}</p>
-            @if (isMicError(snap.listenError)) {
+            @if (isMicError(snap.listenError) && snap.canOpenMicSettings) {
               <button type="button" class="text-btn mic-fix" (click)="openMicSettings()">
-                Open Windows mic settings
+                Open {{ snap.platformLabel }} mic settings
               </button>
             }
           }

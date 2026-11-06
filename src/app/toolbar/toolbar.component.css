@@ -309,3 +309,13 @@ kbd {
   outline: 2px solid var(--accent);
   outline-offset: 2px;
 }
+
+.capture-info {
+  display: inline-flex;
+  align-items: center;
+  cursor: default;
+}
+
+.capture-info:hover {
+  background: rgba(181, 134, 20, 0.18);
+}

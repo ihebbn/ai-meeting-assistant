@@ -59,6 +59,7 @@ import { PROVIDERS, getProvider } from './ai/registry';
 import { AiRuntime } from './ai/runtime';
 import { MIN_LINES_FOR_SUGGESTIONS, shouldAutoSuggest } from './ai/suggest-policy';
 import { toFloat32Pcm } from './pcm';
+import { platformCaps } from './platform';
 import { getSettings, initSettings, updateSettings } from './settings';
 
 const isDev = process.env['ELECTRON_DEV'] === '1';
@@ -84,6 +85,8 @@ type ProtectionState = {
   appliedAt: string | null;
   windows: Record<string, boolean>;
   enabledForDesignCapture: boolean;
+  /** Whether this OS can exclude windows from screen capture at all. */
+  supported: boolean;
 };
 
 type LogEntry = {
@@ -106,6 +109,7 @@ let contentProtection: ProtectionState = {
   appliedAt: null,
   windows: {},
   enabledForDesignCapture: !isContentProtectionEnabled(),
+  supported: platformCaps(process.platform).contentProtection,
 };
 const logEntries: LogEntry[] = [];
 let logFilePath = '';
@@ -177,7 +181,7 @@ function appendLog(level: LogEntry['level'], message: string): void {
   }
 }
 
-function getWindowsBuild(): string {
+function getOsBuild(): string {
   try {
     return `${os.type()} ${os.arch()} release=${os.release()}`;
   } catch (err) {
@@ -211,24 +215,37 @@ function loadRoute(win: BrowserWindow, route: string): void {
 }
 
 function applyContentProtection(win: BrowserWindow, name: SurfaceName): void {
-  const enabled = isContentProtectionEnabled();
-  contentProtection.requested = enabled;
-  contentProtection.enabledForDesignCapture = !enabled;
+  const caps = platformCaps(process.platform);
+  const requested = isContentProtectionEnabled();
+  // The setting only has an effect where the platform supports it.
+  const enabled = requested && caps.contentProtection;
+  contentProtection.requested = requested;
+  contentProtection.supported = caps.contentProtection;
+  contentProtection.enabledForDesignCapture = !requested;
   session.contentProtection = enabled;
   try {
-    win.setContentProtection(enabled);
+    if (caps.contentProtection) {
+      win.setContentProtection(enabled);
+    }
     contentProtection.windows[name] = enabled;
     contentProtection.applied = enabled
       ? Object.values(contentProtection.windows).every(Boolean)
       : false;
-    contentProtection.lastError = null;
+    contentProtection.lastError =
+      requested && !caps.contentProtection
+        ? `Not available on ${caps.label}: the overlay can appear in screen shares.`
+        : null;
     contentProtection.appliedAt = nowIso();
-    appendLog(
-      'info',
-      enabled
-        ? `setContentProtection(true) on ${name}.`
-        : `Content protection OFF on ${name} (overlay is visible in screen capture).`,
-    );
+    if (requested && !caps.contentProtection) {
+      appendLog('warn', `Content protection is not available on ${caps.label}; ${name} stays visible in screen capture.`);
+    } else {
+      appendLog(
+        'info',
+        enabled
+          ? `setContentProtection(true) on ${name}.`
+          : `Content protection OFF on ${name} (overlay is visible in screen capture).`,
+      );
+    }
   } catch (err) {
     contentProtection.windows[name] = false;
     contentProtection.applied = false;
@@ -240,6 +257,9 @@ function applyContentProtection(win: BrowserWindow, name: SurfaceName): void {
 function getPublicSession() {
   return {
     ...session,
+    platformLabel: platformCaps(process.platform).label,
+    contentProtectionSupported: platformCaps(process.platform).contentProtection,
+    canOpenMicSettings: platformCaps(process.platform).micSettingsLinks.length > 0,
     askShortcutLabel: 'Ctrl+Enter',
     hideShortcutLabel: 'Ctrl+\\',
     bothPanelsOpen:
@@ -1003,7 +1023,7 @@ function getSnapshot() {
     electronVersion: process.versions.electron,
     chromeVersion: process.versions.chrome,
     nodeVersion: process.versions.node,
-    windowsBuild: getWindowsBuild(),
+    osBuild: getOsBuild(),
     platform: process.platform,
     arch: process.arch,
     showHideShortcut: HIDE_ACCELERATOR,
@@ -1338,10 +1358,19 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('app:open-mic-settings', async () => {
-    // Windows deep-links for the two places that usually cause silent getUserMedia.
-    await shell.openExternal('ms-settings:privacy-microphone');
-    await shell.openExternal('ms-settings:sound');
-    appendLog('info', 'Opened Windows microphone privacy + sound settings.');
+    const caps = platformCaps(process.platform);
+    if (caps.micSettingsLinks.length === 0) {
+      appendLog('info', `No microphone settings shortcut is available on ${caps.label}.`);
+      return false;
+    }
+    for (const link of caps.micSettingsLinks) {
+      try {
+        await shell.openExternal(link);
+      } catch (err) {
+        appendLog('warn', `Could not open ${link}: ${String(err)}`);
+      }
+    }
+    appendLog('info', `Opened ${caps.label} microphone and sound settings.`);
     return true;
   });
 
@@ -1440,6 +1469,9 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('settings:set-content-protection', (_e, enabled: boolean) => {
+    if (!platformCaps(process.platform).contentProtection) {
+      return getPublicSession();
+    }
     updateSettings({ contentProtection: !!enabled });
     for (const [win, name] of [
       [overlayWindow, 'overlay'],
@@ -1491,7 +1523,7 @@ app.whenReady().then(() => {
   session.contentProtection = isContentProtectionEnabled();
   logFilePath = path.join(userData, 'meeting-copilot-m1.log');
   appendLog('info', `Meeting Copilot M1 starting. Log file: ${logFilePath}`);
-  appendLog('info', `Windows: ${getWindowsBuild()}`);
+  appendLog('info', `OS: ${getOsBuild()}`);
   appendLog('info', `Electron ${process.versions.electron}`);
   appendLog(
     'info',

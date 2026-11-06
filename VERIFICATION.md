@@ -87,3 +87,17 @@ For each mode, verify remote view during drag, resize, collapse, and reopen.
 ## Brief results summary
 
 Live Meet/Teams overlay invisibility and Qwen multilingual acceptance remain **Pending** until an operator completes the tables above with headphones.
+
+## Linux (GNOME, Wayland, PipeWire + pipewire-pulse, Electron 35) — 2026-11-06
+
+| Check | Result |
+| --- | --- |
+| App starts and the overlay opens | Pass (dev run) |
+| Global shortcuts register | Pass (log: both registered) |
+| API key stored in OS keyring via `safeStorage` (libsecret), nothing in plain text | Pass (round-trip probe) |
+| Local ASR decode (Whisper and Qwen) | Pass (benchmark harness on a tone; no real speech) |
+| `getDisplayMedia` loopback returns a "System audio" track | Pass (48 kHz track; setup took about 7 s; no portal prompt appeared) |
+| Loopback delivers the audio that is playing | **Not verified**: my test tone was silent even when recorded directly from the default sink's monitor with `pw-record`, so the test setup was invalid, not the app. Operator: play audio, press Listen, check the Sys meter |
+| Microphone capture | Not tested (not opened, for privacy) |
+| Overlay transparency, always-on-top and drag on Wayland | Not verified visually |
+| Capture protection | Not available on Linux (reported as such in the toolbar and Settings) |

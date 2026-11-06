@@ -109,7 +109,7 @@ export function createInitialSession(): SessionState {
     },
     topic: 'Live conversation',
     recap: [
-      'Press Listen to capture your microphone (You) and Windows system audio.',
+      'Press Listen to capture your microphone (You) and system audio.',
       'Language defaults to Auto — English, French, and Arabic segments are detected per phrase.',
       'Switch Qwen / Whisper in Live Insights for side-by-side testing. Pick an AI provider and add its API key in Settings (⋮ menu) to get real Ask AI answers grounded on the live transcript; without one, Ask AI tells you what to set up. Suggestions are generated from the live transcript when you press Suggest.',
     ],

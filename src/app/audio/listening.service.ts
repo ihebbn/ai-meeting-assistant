@@ -138,7 +138,7 @@ export class ListeningService implements OnDestroy {
       if (!mic.live) {
         await api?.reportListenStatus?.({
           status: 'listening',
-          error: `Windows is giving Electron a silent mic (“${mic.label}”). Enable microphone access for desktop apps, unmute the input, then Stop/Listen again.`,
+          error: `The system is giving the app a silent microphone (“${mic.label}”). Check microphone permissions and that the input is not muted, then Stop/Listen again.`,
           modelReady: false,
         });
         if (!this.openedMicSettings) {
@@ -301,7 +301,7 @@ export class ListeningService implements OnDestroy {
           }
           void getApi()?.reportListenStatus?.({
             status: 'listening',
-            error: `Microphone muted by Windows (“${this.micLabel || track.label}”).`,
+            error: `Microphone muted by the system (“${this.micLabel || track.label}”).`,
             modelReady: false,
           });
         }, 1500);
@@ -445,7 +445,7 @@ export class ListeningService implements OnDestroy {
           this.silentMicWarned = true;
           void getApi()?.reportListenStatus?.({
             status: 'listening',
-            error: `Microphone stays silent (“${this.micLabel}”). Turn on mic access for desktop apps, unmute Realtek/headset input, then Stop/Listen.`,
+            error: `Microphone stays silent (“${this.micLabel}”). Check microphone permissions, unmute the input or pick another one, then Stop/Listen.`,
             modelReady: !!this.sessions.session()?.modelReady,
           });
           if (!this.openedMicSettings) {
