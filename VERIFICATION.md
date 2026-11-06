@@ -97,7 +97,7 @@ Live Meet/Teams overlay invisibility and Qwen multilingual acceptance remain **P
 | API key stored in OS keyring via `safeStorage` (libsecret), nothing in plain text | Pass (round-trip probe) |
 | Local ASR decode (Whisper and Qwen) | Pass (benchmark harness on a tone; no real speech) |
 | `getDisplayMedia` loopback returns a "System audio" track | Pass (48 kHz track; setup took about 7 s; no portal prompt appeared) |
-| Loopback delivers the audio that is playing | **Not verified**: my test tone was silent even when recorded directly from the default sink's monitor with `pw-record`, so the test setup was invalid, not the app. Operator: play audio, press Listen, check the Sys meter |
+| Loopback delivers the audio that is playing | **Pass for the capture path, with a caveat on this machine.** A test tone played with `pw-play` was captured by Chromium's loopback (linked to the default sink's monitor ports), and its level scaled linearly with stream volume (1.7e-5 RMS at 25%, 6.5e-5 at 100%) and matched an OS-level `pw-record` of the same monitor (9.2e-5). The level is about 66 dB below the tone's unity level because this machine's default sink has **monitor volume 0.000482** (`pw-dump`, `monitorVolumes`), so every capturer hears it that quiet. At that level the app's speech gate (RMS 0.005) will treat system audio as silence. Operator: reset the monitor volume (or fix the audio profile), then press Listen and check the Sys meter |
 | Microphone capture | Not tested (not opened, for privacy) |
 | Overlay transparency, always-on-top and drag on Wayland | Not verified visually |
 | Capture protection | Not available on Linux (reported as such in the toolbar and Settings) |

@@ -163,7 +163,7 @@ Windows and Linux are both supported targets for development and use. macOS is u
 | Run (`npm run dev` / `npm start`) | Yes | Yes (checked on GNOME, Wayland, Electron 35) |
 | Hide overlay from screen share | Yes (`setContentProtection`) | **No.** Electron does nothing here; the toolbar shows a non-clickable **Visible** marker and Settings says so |
 | Global shortcuts (`Ctrl+\`, `Ctrl+Enter`) | Yes | Registered on GNOME/Wayland; other compositors unchecked |
-| Microphone + system-audio capture | Verified locally on Windows | System-audio track is obtained via the PulseAudio/PipeWire loopback; **signal not verified** (see below). The library supports "most Linux distros with PulseAudio as a sound server" |
+| Microphone + system-audio capture | Verified locally on Windows | System-audio track is obtained via the PulseAudio/PipeWire loopback and carries the default sink's monitor signal (checked with a test tone; see the note below about monitor volume). The library supports "most Linux distros with PulseAudio as a sound server" |
 | Local ASR (Qwen, Whisper) | Yes | Yes (CPU) |
 | Encrypted API-key storage | DPAPI | OS keyring via `safeStorage` (libsecret checked); refuses the weak plain-text fallback, so set the provider's environment variable if no keyring is available |
 | "Open mic settings" button | Opens Windows settings | Hidden: there is no reliable deep link across desktops |
@@ -173,4 +173,5 @@ Linux notes:
 
 - On Wayland, always-on-top, window positioning and transparency are controlled by the compositor and can differ from Windows; this has not been checked visually.
 - To check system audio yourself: play any audio, press **Listen**, and confirm the **Sys** meter on the toolbar moves and **System audio** lines appear. Use headphones so the microphone does not pick up the speakers.
+- The loopback carries what the default output's **monitor** carries, so it follows the monitor volume. If the Sys meter stays flat while audio plays, check it with `pw-dump | python3 -c "import json,sys; [print(o['id'], o['info']['props'].get('node.name'), o['info'].get('params',{}).get('Props',[{}])[0].get('monitorVolumes')) for o in json.load(sys.stdin) if o.get('type')=='PipeWire:Interface:Node' and o['info']['props'].get('media.class')=='Audio/Sink']"`. A value far below 1.0 (for example 0.0005) mutes the capture; reset it with your audio settings or `pw-cli set-param <sink id> Props '{ monitorVolumes: [1.0, 1.0] }'` (syntax not verified).
 - If `getDisplayMedia` stalls, check that `xdg-desktop-portal` and PipeWire (`pipewire-pulse`) are running.
