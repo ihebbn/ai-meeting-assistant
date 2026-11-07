@@ -1,6 +1,6 @@
 # Windows Meeting Copilot — Milestone 1
 
-One protected, movable, resizable frosted-glass overlay for Google Meet and Microsoft Teams. Live dual-source transcription (microphone + Windows system audio) with local ASR. Ask AI still uses sample answers until dual-source capture is verified with headphones in a real call.
+One protected, movable, resizable frosted-glass overlay for Google Meet and Microsoft Teams. Live dual-source transcription (microphone + Windows system audio) with local ASR, plus Gemini answers grounded in the live transcript.
 
 ## Unified overlay
 
@@ -80,6 +80,24 @@ Bottom-right handle resizes the panel area as a group (min ~420×260). Long cont
 `Ctrl+\` hides panels and restores them with session state intact. The toolbar stays visible. Listening continues until you press Stop.
 
 Capture exclusion: `setContentProtection(true)` on the overlay and diagnostics windows (can be disabled for design screenshots).
+
+## Gemini Ask AI
+
+Ask AI uses a rolling timestamped transcript plus optional **Watch Screen** history.
+
+- **Typed chat** is an explicit request (highest priority).
+- **Ask AI / Ctrl+Enter** with an empty draft answers the latest spoken question or on-screen task.
+- **Live Insights** chips are deduped spoken questions / visible tasks.
+- Gemini chooses transcript, screen, both, or knowledge-only for each reply. AI Response shows **Conversation** / **Screen** badges when those sources were sent.
+- Watch Screen keeps a short in-memory frame history on meaningful changes and keeps running even if the overlay is hidden. Only the context needed for the current request is sent to Gemini; a newer ask cancels the previous stream.
+
+Setup:
+
+1. Copy `.env.example` → `.env`
+2. Set `GEMINI_API_KEY=...` (never commit `.env`)
+3. `npm start` — the key is also mirrored into Electron userData for later launches
+
+Rotate any key that was pasted into chat history.
 
 ## Run
 

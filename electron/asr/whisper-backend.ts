@@ -228,7 +228,7 @@ function normalizePcm(pcm: Float32Array, targetPeak = 0.8): Float32Array {
 }
 
 function cleanupTranscript(text: string): string {
-  return text
+  const cleaned = text
     .replace(/\*[^*]*\*/g, ' ')
     .replace(/\[[^\]]*\]/g, ' ')
     .replace(/\([^)]*\)/g, ' ')
@@ -239,4 +239,26 @@ function cleanupTranscript(text: string): string {
     .replace(/\s+/g, ' ')
     .replace(/^[,.\s]+|[,.\s]+$/g, '')
     .trim();
+  if (!cleaned) {
+    return '';
+  }
+  if (
+    /^(thanks for watching!?|thank you for watching!?|thanks for listening!?|please subscribe)/i.test(
+      cleaned,
+    )
+  ) {
+    return '';
+  }
+  const compact = cleaned.replace(/[\s,.!?…]+/g, '');
+  if (compact.length >= 8 && /^(.)\1+$/u.test(compact)) {
+    return '';
+  }
+  const tokens = cleaned.split(/[\s,./!?…]+/).filter(Boolean);
+  if (tokens.length >= 6) {
+    const first = tokens[0]!.toLowerCase();
+    if (tokens.every((tok) => tok.toLowerCase() === first) && first.length <= 6) {
+      return '';
+    }
+  }
+  return cleaned;
 }

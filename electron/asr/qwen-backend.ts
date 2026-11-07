@@ -239,7 +239,8 @@ export async function transcribeWithQwen(
     pcm: Array.from(pcm),
   });
 
-  return withTimeout(resultPromise, 45_000, 'Qwen transcription timed out.');
+  // Fail fast so Whisper can take over instead of stalling live captions.
+  return withTimeout(resultPromise, 12_000, 'Qwen transcription timed out.');
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {

@@ -52,5 +52,7 @@ contextBridge.exposeInMainWorld('meetingCopilot', {
     ipcRenderer.invoke('listen:set-asr-language', language),
   setCompareMode: (enabled: unknown) =>
     ipcRenderer.invoke('listen:set-compare-mode', enabled),
+  setScreenVisionEnabled: (enabled: unknown) =>
+    ipcRenderer.invoke('session:set-screen-vision', enabled),
   transcribePcm: (payload: unknown) => ipcRenderer.invoke('listen:transcribe-pcm', payload),
 });

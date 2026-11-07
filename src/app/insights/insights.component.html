@@ -63,6 +63,14 @@
               />
               Compare
             </label>
+            <label class="asr-check">
+              <input
+                type="checkbox"
+                [checked]="snap.screenVisionEnabled !== false"
+                (change)="onScreenVisionChange($event)"
+              />
+              Watch Screen
+            </label>
           </div>
           <p class="asr-meta">
             {{ snap.asrModelLabel }}
@@ -70,7 +78,14 @@
             @if (snap.detectedLanguage) {
               · Detected {{ snap.detectedLanguage }}
             }
+            · Watch {{ snap.screenVisionEnabled ? 'on' : 'off' }}
+            @if (snap.lastScreenCaptureAt) {
+              · Seen {{ snap.lastScreenCaptureAt | date: 'HH:mm:ss' }}
+            }
           </p>
+          @if (snap.screenVisionError) {
+            <p class="listen-error">{{ snap.screenVisionError }}</p>
+          }
           @if (snap.asrSetupMessage) {
             <p class="listen-error">{{ snap.asrSetupMessage }}</p>
           }
@@ -95,6 +110,9 @@
             <p [attr.data-speaker]="line.speaker">
               <strong>
                 {{ line.speaker }}
+                @if (line.at) {
+                  <span class="time-tag">{{ line.at | date: 'HH:mm:ss' }}</span>
+                }
                 @if (line.language) {
                   <span class="lang-tag">{{ line.language }}</span>
                 }

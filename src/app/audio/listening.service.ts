@@ -5,18 +5,20 @@ import { SessionService } from '../session.service';
 type SourceName = 'you' | 'system';
 
 const TARGET_RATE = 16000;
-/** Short phrase windows — long noisy buffers make Whisper invent words or go blank. */
-const MAX_UTTERANCE_SEC = 5.5;
-const OVERLAP_SEC = 0.45;
-const PAD_UTTERANCE_SEC = 0.35;
-const MIN_UTTERANCE_SEC = 0.35;
-const SILENCE_FLUSH_MS = 420;
-const LEVEL_PUSH_MS = 80;
-const SPEECH_RMS = 0.005;
-const SILENCE_RMS = 0.0025;
-const MIC_LIVE_RMS = 0.008;
-const MIN_SPEECH_RATIO = 0.14;
-const MAX_QUEUED_UTTERANCES = 3;
+/** Short phrase windows keep captions closer to live speech. */
+const MAX_UTTERANCE_SEC = 3.2;
+const OVERLAP_SEC = 0.35;
+const PAD_UTTERANCE_SEC = 0.25;
+const MIN_UTTERANCE_SEC = 0.28;
+const SILENCE_FLUSH_MS = 260;
+/** Meter sampling; IPC reports are further throttled when values barely change. */
+const LEVEL_PUSH_MS = 160;
+const LEVEL_REPORT_MIN_MS = 180;
+const SPEECH_RMS = 0.004;
+const SILENCE_RMS = 0.002;
+const MIC_LIVE_RMS = 0.006;
+const MIN_SPEECH_RATIO = 0.1;
+const MAX_QUEUED_UTTERANCES = 10;
 
 class SourceCapture {
   stream: MediaStream | null = null;
@@ -45,12 +47,18 @@ export class ListeningService implements OnDestroy {
   private readonly system = new SourceCapture('system');
   private running = false;
   private starting = false;
+  /** Bumped on every stop/start so abandoned startups cannot steal the session. */
+  private listenGeneration = 0;
   private levelTimer: number | null = null;
   private destroyed = false;
   private lastMicDiag = 0;
+  private lastLevelReportAt = 0;
+  private lastReportedMic = -1;
+  private lastReportedSys = -1;
+  private lastReportedMicActive = false;
+  private lastReportedSysActive = false;
   private micLabel = '';
   private silentMicWarned = false;
-  private openedMicSettings = false;
 
   constructor() {
     effect(() => {
@@ -75,9 +83,9 @@ export class ListeningService implements OnDestroy {
     if (this.running || this.starting) {
       return;
     }
+    const generation = ++this.listenGeneration;
     this.starting = true;
     this.silentMicWarned = false;
-    this.openedMicSettings = false;
     const api = getApi();
     try {
       await api?.reportListenStatus?.({
@@ -85,8 +93,14 @@ export class ListeningService implements OnDestroy {
         error: 'Loading speech model…',
         modelReady: false,
       });
+      if (generation !== this.listenGeneration) {
+        return;
+      }
 
       const model = await api?.ensureTranscriber?.();
+      if (generation !== this.listenGeneration) {
+        return;
+      }
       if (!model?.ready) {
         throw new Error(
           model?.error ||
@@ -100,6 +114,14 @@ export class ListeningService implements OnDestroy {
         throw new Error('System audio loopback bridge is unavailable.');
       }
       await api.enableLoopbackAudio();
+      if (generation !== this.listenGeneration) {
+        try {
+          await api.disableLoopbackAudio();
+        } catch {
+          // Already disabled.
+        }
+        return;
+      }
       let systemStream: MediaStream;
       try {
         systemStream = await navigator.mediaDevices.getDisplayMedia({
@@ -109,6 +131,12 @@ export class ListeningService implements OnDestroy {
       } finally {
         await api.disableLoopbackAudio();
       }
+      if (generation !== this.listenGeneration) {
+        for (const track of systemStream.getTracks()) {
+          track.stop();
+        }
+        return;
+      }
       for (const track of systemStream.getVideoTracks()) {
         track.stop();
         systemStream.removeTrack(track);
@@ -117,14 +145,31 @@ export class ListeningService implements OnDestroy {
         throw new Error('System audio track missing — loopback did not start.');
       }
       await this.attachStream(this.system, systemStream, 1);
+      if (generation !== this.listenGeneration) {
+        this.teardownSource(this.system);
+        return;
+      }
 
       const mic = await this.openLiveMicrophone();
+      if (generation !== this.listenGeneration) {
+        mic.stream.getTracks().forEach((t) => t.stop());
+        this.teardownSource(this.system);
+        return;
+      }
       this.micLabel = mic.label;
       await this.attachStream(this.mic, mic.stream, 1);
+      if (generation !== this.listenGeneration) {
+        this.teardownSource(this.mic);
+        this.teardownSource(this.system);
+        return;
+      }
 
       this.running = true;
       this.startLevelPump();
       void api?.ensureTranscriber?.().then((ok) => {
+        if (generation !== this.listenGeneration) {
+          return;
+        }
         void api.reportListenStatus?.({
           status: 'listening',
           error: ok?.error ?? null,
@@ -132,33 +177,32 @@ export class ListeningService implements OnDestroy {
         });
       });
 
+      // Never open Windows Settings automatically — just start listening.
+      await api?.reportListenStatus?.({
+        status: 'listening',
+        error: null,
+        modelReady: !!model?.ready,
+      });
       if (!mic.live) {
-        await api?.reportListenStatus?.({
-          status: 'listening',
-          error: `Windows is giving Electron a silent mic (“${mic.label}”). Enable microphone access for desktop apps, unmute the input, then Stop/Listen again.`,
-          modelReady: false,
-        });
-        if (!this.openedMicSettings) {
-          this.openedMicSettings = true;
-          void api?.openMicSettings?.();
-        }
-      } else {
-        await api?.reportListenStatus?.({
-          status: 'listening',
-          error: null,
-          modelReady: false,
-        });
+        console.info(
+          `[listen] mic “${mic.label}” was quiet during quick probe — continuing anyway`,
+        );
       }
     } catch (err) {
+      if (generation !== this.listenGeneration) {
+        return;
+      }
       await this.stop('start-failed');
       await api?.reportListenStatus?.({
         status: 'error',
-        error: String(err),
+        error: formatListenError(err),
         modelReady: false,
       });
       await api?.setListening?.(false);
     } finally {
-      this.starting = false;
+      if (generation === this.listenGeneration) {
+        this.starting = false;
+      }
     }
   }
 
@@ -167,9 +211,8 @@ export class ListeningService implements OnDestroy {
     label: string;
     live: boolean;
   }> {
-    const warm = await navigator.mediaDevices.getUserMedia({ audio: true, video: false });
-    warm.getTracks().forEach((t) => t.stop());
-
+    // Fast path: open the default mic immediately so Listen feels instant.
+    // Only fall back to other devices if the default stays near-silent.
     const permission = await navigator.permissions
       ?.query({ name: 'microphone' as PermissionName })
       .then((p) => p.state)
@@ -178,13 +221,8 @@ export class ListeningService implements OnDestroy {
 
     const devices = await navigator.mediaDevices.enumerateDevices();
     const inputs = devices.filter((d) => d.kind === 'audioinput' && d.deviceId);
-    console.info(
-      '[listen] mic devices',
-      inputs.map((d) => `${d.label || '(unnamed)'} [${d.deviceId.slice(0, 8)}]`),
-    );
-
     const ranked = [...inputs].sort((a, b) => scoreMicLabel(b.label) - scoreMicLabel(a.label));
-    const attempts: Array<MediaDeviceInfo | null> = [null, ...ranked];
+    const attempts: Array<MediaDeviceInfo | null> = [null, ...ranked.slice(0, 3)];
 
     let best: { stream: MediaStream; label: string; peak: number } | null = null;
 
@@ -208,10 +246,9 @@ export class ListeningService implements OnDestroy {
 
       const track = stream.getAudioTracks()[0];
       const label = device?.label || track?.label || 'Default microphone';
-      const settings = track?.getSettings?.() ?? {};
-      const peak = await measureStreamPeak(stream, 700);
+      const peak = await measureStreamPeak(stream, 220);
       console.info(
-        `[listen] mic probe “${label}” peak=${peak.toFixed(4)} muted=${track?.muted} enabled=${track?.enabled} settings=${JSON.stringify(settings)}`,
+        `[listen] mic probe “${label}” peak=${peak.toFixed(4)} muted=${track?.muted}`,
       );
 
       if (!best || peak > best.peak) {
@@ -223,7 +260,8 @@ export class ListeningService implements OnDestroy {
         stream.getTracks().forEach((t) => t.stop());
       }
 
-      if (peak >= MIC_LIVE_RMS) {
+      // Default/first usable device is enough — don't stall probing every input.
+      if (peak >= MIC_LIVE_RMS || device === null) {
         break;
       }
     }
@@ -240,6 +278,7 @@ export class ListeningService implements OnDestroy {
   }
 
   private async stop(reason: string): Promise<void> {
+    this.listenGeneration += 1;
     this.running = false;
     this.starting = false;
     if (this.levelTimer != null) {
@@ -329,8 +368,10 @@ export class ListeningService implements OnDestroy {
     }
 
     const trackRate = stream.getAudioTracks()[0]?.getSettings?.().sampleRate;
-    const context = new AudioContext(
-      typeof trackRate === 'number' && trackRate > 0 ? { sampleRate: trackRate } : undefined,
+    // Chromium throws NotSupportedError when the track's sampleRate cannot be
+    // forced on AudioContext (common with WASAPI loopback). Fall back to default.
+    const context = createAudioContext(
+      typeof trackRate === 'number' && trackRate > 0 ? trackRate : undefined,
     );
     capture.context = context;
     if (context.state === 'suspended') {
@@ -414,14 +455,25 @@ export class ListeningService implements OnDestroy {
     this.levelTimer = window.setInterval(() => {
       this.sampleLevel(this.mic);
       this.sampleLevel(this.system);
-      void getApi()?.reportAudioActivity?.({
-        micLevel: this.mic.level,
-        systemLevel: this.system.level,
-        micActive: this.mic.active,
-        systemActive: this.system.active,
-      });
-
       const now = performance.now();
+      const levelChanged =
+        Math.abs(this.mic.level - this.lastReportedMic) > 0.04 ||
+        Math.abs(this.system.level - this.lastReportedSys) > 0.04 ||
+        this.mic.active !== this.lastReportedMicActive ||
+        this.system.active !== this.lastReportedSysActive;
+      if (levelChanged && now - this.lastLevelReportAt >= LEVEL_REPORT_MIN_MS) {
+        this.lastLevelReportAt = now;
+        this.lastReportedMic = this.mic.level;
+        this.lastReportedSys = this.system.level;
+        this.lastReportedMicActive = this.mic.active;
+        this.lastReportedSysActive = this.system.active;
+        void getApi()?.reportAudioActivity?.({
+          micLevel: this.mic.level,
+          systemLevel: this.system.level,
+          micActive: this.mic.active,
+          systemActive: this.system.active,
+        });
+      }
       if (now - this.lastMicDiag > 2000) {
         this.lastMicDiag = now;
         console.info(
@@ -438,18 +490,13 @@ export class ListeningService implements OnDestroy {
         } else if (
           !this.silentMicWarned &&
           this.mic.peakRms > 0 &&
-          this.mic.peakRms < 0.0025
+          this.mic.peakRms < 0.002
         ) {
           this.silentMicWarned = true;
-          void getApi()?.reportListenStatus?.({
-            status: 'listening',
-            error: `Microphone stays silent (“${this.micLabel}”). Turn on mic access for desktop apps, unmute Realtek/headset input, then Stop/Listen.`,
-            modelReady: !!this.sessions.session()?.modelReady,
-          });
-          if (!this.openedMicSettings) {
-            this.openedMicSettings = true;
-            void getApi()?.openMicSettings?.();
-          }
+          // Soft status only — never steal focus into Windows Settings.
+          console.warn(
+            `[listen] mic “${this.micLabel}” still very quiet — check Windows mic privacy if captions stay empty`,
+          );
         }
         this.mic.peakRms = 0;
       }
@@ -548,10 +595,19 @@ export class ListeningService implements OnDestroy {
       capture.silentSince = 0;
     }
 
-    if (speechRatio(chunk) < MIN_SPEECH_RATIO) {
+    const ratio = speechRatio(chunk);
+    if (ratio < MIN_SPEECH_RATIO) {
       console.info(
-        `[listen] skip ${capture.name} — low speech ratio (${speechRatio(chunk).toFixed(2)})`,
+        `[listen] skip ${capture.name} — low speech ratio (${ratio.toFixed(2)})`,
       );
+      return;
+    }
+    let peak = 0;
+    for (let i = 0; i < chunk.length; i += 1) {
+      peak = Math.max(peak, Math.abs(chunk[i]!));
+    }
+    if (peak < SPEECH_RMS) {
+      console.info(`[listen] skip ${capture.name} — peak too low (${peak.toFixed(4)})`);
       return;
     }
 
@@ -559,6 +615,13 @@ export class ListeningService implements OnDestroy {
     while (capture.queue.length > MAX_QUEUED_UTTERANCES) {
       capture.queue.shift();
     }
+    // Show a live placeholder immediately so Insights doesn't wait for ASR.
+    void getApi()?.upsertTranscript?.({
+      id: interimId(capture.name),
+      speaker: capture.name === 'you' ? 'You' : 'System audio',
+      text: '…',
+      provisional: true,
+    });
     void this.drainQueue(capture);
   }
 
@@ -574,6 +637,7 @@ export class ListeningService implements OnDestroy {
     const generation = capture.generation;
     const speaker = capture.name === 'you' ? 'You' : 'System audio';
     const api = getApi();
+    const interim = interimId(capture.name);
     try {
       while (capture.queue.length && generation === capture.generation) {
         const chunk = capture.queue.shift();
@@ -612,10 +676,7 @@ export class ListeningService implements OnDestroy {
                 : speaker;
             await api?.appendTranscript?.({
               speaker: label,
-              text:
-                results.length > 1 && item.latencyMs
-                  ? `${cleaned}  (${item.latencyMs}ms)`
-                  : cleaned,
+              text: cleaned,
               language: item.language,
               backend: item.backend,
               latencyMs: item.latencyMs,
@@ -638,11 +699,24 @@ export class ListeningService implements OnDestroy {
         }
       }
     } finally {
+      // Clear the live placeholder once the queue is drained.
+      if (!capture.queue.length) {
+        void api?.upsertTranscript?.({
+          id: interim,
+          speaker,
+          text: '',
+          provisional: true,
+        });
+      }
       if (generation === capture.generation) {
         capture.draining = false;
       }
     }
   }
+}
+
+function interimId(source: SourceName): string {
+  return source === 'you' ? 'you-interim-live' : 'system-interim-live';
 }
 
 function scoreMicLabel(label: string): number {
@@ -670,7 +744,7 @@ function scoreMicLabel(label: string): number {
 }
 
 async function measureStreamPeak(stream: MediaStream, ms: number): Promise<number> {
-  const context = new AudioContext();
+  const context = createAudioContext();
   const mute = context.createGain();
   mute.gain.value = 0;
   try {
@@ -806,8 +880,30 @@ function normalizeTranscriptResults(
   ];
 }
 
+function createAudioContext(sampleRate?: number): AudioContext {
+  if (typeof sampleRate === 'number' && sampleRate > 0) {
+    try {
+      return new AudioContext({ sampleRate });
+    } catch (err) {
+      console.warn(
+        `[listen] AudioContext sampleRate=${sampleRate} unsupported, using default`,
+        err,
+      );
+    }
+  }
+  return new AudioContext();
+}
+
+function formatListenError(err: unknown): string {
+  const raw = String(err ?? 'Listen failed');
+  if (/NotSupportedError/i.test(raw) || /Not supported/i.test(raw)) {
+    return 'Audio capture not supported with the current device rate. Stop/Listen again — the app will retry with the default rate.';
+  }
+  return raw;
+}
+
 function cleanupCaption(text: string): string {
-  const t = text
+  let t = text
     .replace(/\*[^*]*\*/g, ' ')
     .replace(/\[[^\]]*\]/g, ' ')
     .replace(/\([^)]*\)/g, ' ')
@@ -818,10 +914,39 @@ function cleanupCaption(text: string): string {
   if (!t || t.length < 2) {
     return '';
   }
-  if (/^[^a-zA-Z0-9]+$/.test(t)) {
+  // Keep Arabic/French/etc. — only reject strings with no letters or digits at all.
+  if (!/\p{L}|\p{N}/u.test(t)) {
+    return '';
+  }
+  if (isWhisperHallucination(t)) {
     return '';
   }
   return t;
+}
+
+/** Classic Whisper garbage on silence / noise. */
+function isWhisperHallucination(text: string): boolean {
+  const t = text.trim();
+  if (
+    /^(thanks for watching!?|thank you for watching!?|thanks for listening!?|please subscribe|subtitles by.*|amara\.org|www\.|http)/i.test(
+      t,
+    )
+  ) {
+    return true;
+  }
+  // Long runs of the same short token: "Ah, ah, ah…" / "CCCCCCCC"
+  const compact = t.replace(/[\s,.!?…]+/g, '');
+  if (compact.length >= 8 && /^(.)\1+$/u.test(compact)) {
+    return true;
+  }
+  const tokens = t.split(/[\s,./!?…]+/).filter(Boolean);
+  if (tokens.length >= 6) {
+    const first = tokens[0]!.toLowerCase();
+    if (tokens.every((tok) => tok.toLowerCase() === first) && first.length <= 6) {
+      return true;
+    }
+  }
+  return false;
 }
 
 function downsampleTo16k(

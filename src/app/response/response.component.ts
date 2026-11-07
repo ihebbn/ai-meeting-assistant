@@ -22,6 +22,16 @@ export class ResponseComponent implements OnInit {
     const messages = this.session()?.messages ?? [];
     return messages.some((m) => m.role === 'assistant' && m.streaming);
   });
+  readonly usedConversation = computed(() => {
+    const messages = this.session()?.messages ?? [];
+    const assistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    return !!assistant?.usedConversation;
+  });
+  readonly usedScreen = computed(() => {
+    const messages = this.session()?.messages ?? [];
+    const assistant = [...messages].reverse().find((m) => m.role === 'assistant');
+    return !!assistant?.usedScreen;
+  });
   draft = '';
 
   ngOnInit(): void {

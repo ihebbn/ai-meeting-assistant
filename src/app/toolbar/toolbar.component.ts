@@ -33,22 +33,45 @@ export class ToolbarComponent implements OnInit {
   }
 
   toggleListen(): void {
+    const cur = this.session();
+    const next = !(cur?.listening ?? false);
+    // Instant feedback — capture startup still runs in the background.
+    this.sessions.patchLocal({
+      listening: next,
+      listenStatus: next ? 'starting' : 'idle',
+      listenError: next ? null : cur?.listenError ?? null,
+    });
     void getApi()?.toggleListen?.();
   }
 
   ask(): void {
-    void getApi()?.ask?.('Suggest a reply');
+    // Empty prompt → shortcut path (latest spoken question / on-screen task).
+    void getApi()?.ask?.('');
   }
 
   toggleHidePanels(): void {
+    const cur = this.session();
+    this.sessions.patchLocal({ panelsHidden: !(cur?.panelsHidden ?? false) });
     void getApi()?.toggleHidden?.();
   }
 
   toggleInsights(): void {
+    const cur = this.session();
+    const open = !(cur?.insightsVisible ?? false);
+    this.sessions.patchLocal({
+      insightsOpen: open,
+      panelsHidden: false,
+    });
     void getApi()?.togglePanel?.('insights');
   }
 
   toggleResponse(): void {
+    const cur = this.session();
+    const open = !(cur?.responseVisible ?? false);
+    this.sessions.patchLocal({
+      responseOpen: open,
+      panelsHidden: false,
+    });
     void getApi()?.togglePanel?.('response');
   }
 

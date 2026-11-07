@@ -103,6 +103,36 @@ h1 {
   padding: 4px 16px 12px;
 }
 
+.source-badges {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin: 0 0 10px;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.badge.conversation {
+  background: rgba(147, 197, 253, 0.18);
+  color: #bfdbfe;
+  border: 1px solid rgba(147, 197, 253, 0.28);
+}
+
+.badge.screen {
+  background: rgba(134, 239, 172, 0.14);
+  color: #bbf7d0;
+  border: 1px solid rgba(134, 239, 172, 0.28);
+}
+
 .answer {
   margin: 0;
   font-size: 0.95rem;

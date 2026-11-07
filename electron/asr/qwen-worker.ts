@@ -76,7 +76,7 @@ function loadRecognizer(modelDir: string): void {
 }
 
 function cleanupTranscript(text: string): string {
-  return text
+  const cleaned = text
     .replace(/\*[^*]*\*/g, ' ')
     .replace(/\[[^\]]*\]/g, ' ')
     .replace(/\([^)]*\)/g, ' ')
@@ -87,6 +87,17 @@ function cleanupTranscript(text: string): string {
     .replace(/\s+/g, ' ')
     .replace(/^[,.\s]+|[,.\s]+$/g, '')
     .trim();
+  if (!cleaned) {
+    return '';
+  }
+  if (
+    /^(thanks for watching!?|thank you for watching!?|thanks for listening!?|please subscribe)/i.test(
+      cleaned,
+    )
+  ) {
+    return '';
+  }
+  return cleaned;
 }
 
 function inferLanguage(

@@ -11,6 +11,8 @@ export type TranscriptLine = {
   id: string;
   speaker: string;
   text: string;
+  /** ISO timestamp when the caption was committed. */
+  at?: string;
   language?: string | null;
   backend?: AsrBackendId | null;
   latencyMs?: number | null;
@@ -21,6 +23,9 @@ export type AiMessage = {
   role: 'user' | 'assistant';
   text: string;
   streaming?: boolean;
+  /** Sources that materially informed this assistant reply. */
+  usedConversation?: boolean;
+  usedScreen?: boolean;
 };
 
 export type OverlaySize = {
@@ -66,6 +71,10 @@ export type SessionState = {
   detectedLanguage: string | null;
   asrModelLabel: string;
   asrSetupMessage: string | null;
+  /** Watch Screen — on by default; tracks display changes in the background. */
+  screenVisionEnabled: boolean;
+  lastScreenCaptureAt: string | null;
+  screenVisionError: string | null;
 };
 
 export const ASK_ACCELERATOR = 'CommandOrControl+Return';
@@ -97,20 +106,15 @@ export function createInitialSession(): SessionState {
     },
     topic: 'Live conversation',
     recap: [
-      'Press Listen to capture your microphone (You) and Windows system audio.',
-      'Language defaults to Auto — English, French, and Arabic segments are detected per phrase.',
-      'Switch Qwen / Whisper in Live Insights for side-by-side testing. Ask AI stays sample-only until dual-source capture is verified.',
+      'Press Listen for a rolling timestamped transcript (You + System audio).',
+      'Enable Watch Screen to track meaningful display changes in the background.',
+      'Type a question, press Ask AI, or tap an insight — Gemini picks transcript, screen, both, or knowledge.',
     ],
     actions: [
-      { id: 'define', label: 'Define startup acquisition', icon: 'book' },
-      {
-        id: 'search-windsurf',
-        label: 'Search the web for information about Windsurf acquisition',
-        icon: 'globe',
-      },
-      { id: 'followups', label: 'Suggest follow-up questions', icon: 'chat' },
-      { id: 'helpful', label: 'Give me helpful information', icon: 'sparkle' },
       { id: 'reply', label: 'Suggest a reply', icon: 'reply' },
+      { id: 'screen', label: 'Explain what is on screen', icon: 'globe' },
+      { id: 'followups', label: 'Suggest follow-up questions', icon: 'chat' },
+      { id: 'helpful', label: 'Give me helpful talking points', icon: 'sparkle' },
     ],
     transcript: [],
     currentQuestion: '',
@@ -131,42 +135,14 @@ export function createInitialSession(): SessionState {
     detectedLanguage: null,
     asrModelLabel: 'Whisper base',
     asrSetupMessage: null,
+    screenVisionEnabled: true,
+    lastScreenCaptureAt: null,
+    screenVisionError: null,
   };
 }
 
-const SAMPLE_ANSWERS: Record<string, string> = {
-  define:
-    'A startup acquisition is when an established company buys a younger company — usually for its product, talent, customers, or intellectual property — instead of building the same capability from scratch.',
-  'search-windsurf':
-    "On July 14, 2025, Cognition acquired the remainder of Windsurf to integrate into its Devin platform. Includes Windsurf's agentic IDE, IP, brand, $82 M ARR, 350+ enterprise clients, and full team.",
-  followups:
-    '• What drove Cognition to buy Windsurf instead of competing?\n• How does Windsurf’s IDE fit into Devin’s roadmap?\n• What happens to Windsurf’s enterprise contracts after the deal?\n• Are similar coding-tool acquisitions likely this year?',
-  helpful:
-    'Useful talking points: Cognition is known for Devin, an autonomous coding agent. Buying Windsurf strengthens the IDE + agent stack, adds recurring revenue, and brings an experienced product team. Frame it as consolidation in the AI developer-tools market.',
-  reply:
-    'Suggested reply: “Cognition acquired Windsurf in July 2025 to fold its agentic IDE and team into Devin — it looks like a capability + talent deal, not just a brand buy.”',
-  default:
-    'Ask AI is still on sample answers. Verify microphone + system-audio transcription with headphones in a real call before wiring answers to the live transcript.',
-};
-
-export function answerForPrompt(prompt: string, actionId?: string): string {
-  if (actionId && SAMPLE_ANSWERS[actionId]) {
-    return SAMPLE_ANSWERS[actionId];
-  }
-  const lower = prompt.toLowerCase();
-  if (lower.includes('windsurf') || lower.includes('acquisition')) {
-    return SAMPLE_ANSWERS['search-windsurf'];
-  }
-  if (lower.includes('follow-up') || lower.includes('follow up')) {
-    return SAMPLE_ANSWERS.followups;
-  }
-  if (lower.includes('reply')) {
-    return SAMPLE_ANSWERS.reply;
-  }
-  if (lower.includes('define')) {
-    return SAMPLE_ANSWERS.define;
-  }
-  return SAMPLE_ANSWERS.default;
+export function answerForPrompt(_prompt: string, _actionId?: string): string {
+  return 'Gemini is not configured. Add GEMINI_API_KEY to a local .env file and restart.';
 }
 
 export function anyPanelOpen(session: SessionState): boolean {

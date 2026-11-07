@@ -7,12 +7,14 @@ import {
   inject,
   viewChild,
 } from '@angular/core';
+import { DatePipe } from '@angular/common';
 import { AsrBackendId, AsrLanguageId, getApi } from '../electron-api';
 import { SessionService } from '../session.service';
 
 @Component({
   selector: 'app-insights',
   standalone: true,
+  imports: [DatePipe],
   templateUrl: './insights.component.html',
   styleUrl: './insights.component.css',
 })
@@ -72,6 +74,11 @@ export class InsightsComponent implements OnInit {
   onCompareChange(event: Event): void {
     const enabled = (event.target as HTMLInputElement).checked;
     void getApi()?.setCompareMode?.(enabled);
+  }
+
+  onScreenVisionChange(event: Event): void {
+    const enabled = (event.target as HTMLInputElement).checked;
+    void getApi()?.setScreenVisionEnabled?.(enabled);
   }
 
   collapse(): void {

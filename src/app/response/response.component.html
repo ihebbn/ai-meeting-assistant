@@ -33,6 +33,16 @@
     </header>
 
     <div class="body">
+      @if (usedConversation() || usedScreen()) {
+        <div class="source-badges" aria-label="Answer sources">
+          @if (usedConversation()) {
+            <span class="badge conversation">Conversation</span>
+          }
+          @if (usedScreen()) {
+            <span class="badge screen">Screen</span>
+          }
+        </div>
+      }
       <p class="answer" [class.streaming]="streaming()">
         {{ assistantText() || 'Ask a question or choose an action from Live insights.' }}
         @if (streaming()) {

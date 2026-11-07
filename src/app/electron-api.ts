@@ -11,6 +11,7 @@ export type TranscriptLine = {
   id: string;
   speaker: string;
   text: string;
+  at?: string;
   language?: string | null;
   backend?: AsrBackendId | null;
   latencyMs?: number | null;
@@ -29,6 +30,8 @@ export type AiMessage = {
   role: 'user' | 'assistant';
   text: string;
   streaming?: boolean;
+  usedConversation?: boolean;
+  usedScreen?: boolean;
 };
 
 export type OverlaySize = {
@@ -77,6 +80,9 @@ export type SessionView = {
   detectedLanguage: string | null;
   asrModelLabel: string;
   asrSetupMessage: string | null;
+  screenVisionEnabled: boolean;
+  lastScreenCaptureAt: string | null;
+  screenVisionError: string | null;
 };
 
 export type ProtectionState = {
@@ -143,7 +149,7 @@ export type MeetingCopilotApi = {
   onLog?: (callback: (entry: LogEntry) => void) => () => void;
   enableLoopbackAudio?: () => Promise<void>;
   disableLoopbackAudio?: () => Promise<void>;
-  reportAudioActivity?: (activity: AudioActivity) => Promise<SessionView>;
+  reportAudioActivity?: (activity: AudioActivity) => Promise<SessionView | boolean>;
   reportListenStatus?: (payload: {
     status: ListenStatus;
     error: string | null;
@@ -168,6 +174,7 @@ export type MeetingCopilotApi = {
   setAsrBackend?: (backend: AsrBackendId) => Promise<SessionView>;
   setAsrLanguage?: (language: AsrLanguageId) => Promise<SessionView>;
   setCompareMode?: (enabled: boolean) => Promise<SessionView>;
+  setScreenVisionEnabled?: (enabled: boolean) => Promise<SessionView>;
   transcribePcm?: (payload: {
     source: 'you' | 'system';
     sampleRate: number;
