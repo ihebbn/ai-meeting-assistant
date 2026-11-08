@@ -1,4 +1,5 @@
 import type { InsightAction, TranscriptLine } from '../session';
+import { commitTranscriptLine } from '../asr/transcript-merge';
 import type { ScreenFrame } from './screen-capture';
 
 export type ContextNeed = 'transcript' | 'screen' | 'both' | 'none';
@@ -62,12 +63,7 @@ export function appendRollingTranscript(
   existing: TranscriptLine[],
   line: TranscriptLine,
 ): TranscriptLine[] {
-  const withTs: TranscriptLine = {
-    ...line,
-    at: line.at || new Date().toISOString(),
-  };
-  const next = [...existing.filter((t) => !t.id.startsWith('you-interim-')), withTs];
-  return next.slice(-MAX_TRANSCRIPT_LINES);
+  return commitTranscriptLine(existing, line, MAX_TRANSCRIPT_LINES);
 }
 
 export function fingerprintSuggestion(label: string): string {

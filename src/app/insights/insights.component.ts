@@ -8,6 +8,7 @@ import {
   viewChild,
 } from '@angular/core';
 import { DatePipe } from '@angular/common';
+import { ListenDiagnostics } from '../audio/listen-diagnostics';
 import { AsrBackendId, AsrLanguageId, getApi } from '../electron-api';
 import { SessionService } from '../session.service';
 
@@ -20,7 +21,9 @@ import { SessionService } from '../session.service';
 })
 export class InsightsComponent implements OnInit {
   private readonly sessions = inject(SessionService);
+  private readonly diag = inject(ListenDiagnostics);
   private readonly scrollBody = viewChild<ElementRef<HTMLDivElement>>('scrollBody');
+  private readonly paintedFinals = new Set<string>();
   readonly session = this.sessions.session;
   readonly showTranscript = computed(() => this.session()?.showTranscript ?? false);
 
@@ -30,9 +33,31 @@ export class InsightsComponent implements OnInit {
   constructor() {
     afterRenderEffect(() => {
       const show = this.showTranscript();
-      const count = this.session()?.transcript.length ?? 0;
+      const lines = this.session()?.transcript ?? [];
+      if (show) {
+        for (const line of lines) {
+          if (line.id.includes('interim')) {
+            if (line.text === '…') {
+              this.diag.noteInterimPaint(line.id);
+            }
+            continue;
+          }
+          if (!this.paintedFinals.has(line.id)) {
+            this.paintedFinals.add(line.id);
+            this.diag.notePainted(line.id);
+          }
+        }
+        if (this.paintedFinals.size > 400) {
+          const live = new Set(lines.map((line) => line.id));
+          for (const id of this.paintedFinals) {
+            if (!live.has(id)) {
+              this.paintedFinals.delete(id);
+            }
+          }
+        }
+      }
       const el = this.scrollBody()?.nativeElement;
-      if (!show || !el || count === 0 || !this.followTalk) {
+      if (!show || !el || lines.length === 0 || !this.followTalk) {
         return;
       }
       el.scrollTop = el.scrollHeight;

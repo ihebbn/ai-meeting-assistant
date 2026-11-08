@@ -41,12 +41,15 @@
               >
                 <option value="qwen">Qwen3-ASR</option>
                 <option value="whisper">Whisper</option>
+                <option value="soniox">Soniox</option>
               </select>
             </label>
             <label class="asr-field">
               <span>Language</span>
               <select
                 [value]="snap.asrLanguage"
+                [disabled]="snap.asrBackend === 'soniox'"
+                title="Soniox keeps English, French, German, and Arabic open together. This menu applies to Qwen and Whisper."
                 (change)="onLanguageChange($event)"
               >
                 <option value="auto">Auto</option>
@@ -59,6 +62,7 @@
               <input
                 type="checkbox"
                 [checked]="snap.asrCompareMode"
+                [disabled]="snap.asrBackend === 'soniox'"
                 (change)="onCompareChange($event)"
               />
               Compare

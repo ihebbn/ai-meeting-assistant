@@ -4,7 +4,7 @@ export type InsightAction = {
   icon: 'book' | 'globe' | 'chat' | 'sparkle' | 'reply';
 };
 
-export type AsrBackendId = 'qwen' | 'whisper';
+export type AsrBackendId = 'qwen' | 'whisper' | 'soniox';
 export type AsrLanguageId = 'auto' | 'en' | 'fr' | 'ar';
 
 export type TranscriptLine = {
@@ -178,8 +178,15 @@ export type MeetingCopilotApi = {
   transcribePcm?: (payload: {
     source: 'you' | 'system';
     sampleRate: number;
-    pcm: number[];
+    pcm: Float32Array;
   }) => Promise<TranscriptResult | string>;
+  sonioxStart?: (
+    sources: Array<'you' | 'system'>,
+  ) => Promise<{ ok: boolean; error: string | null }>;
+  sonioxStop?: () => Promise<boolean>;
+  sonioxAudio?: (payload: { source: 'you' | 'system'; pcm: Float32Array }) => void;
+  /** True when the Electron app was started with ELECTRON_DEV=1. */
+  isDev?: boolean;
 };
 
 declare global {

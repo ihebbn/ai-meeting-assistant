@@ -4,7 +4,7 @@ export type InsightAction = {
   icon: 'book' | 'globe' | 'chat' | 'sparkle' | 'reply';
 };
 
-export type AsrBackendId = 'qwen' | 'whisper';
+export type AsrBackendId = 'qwen' | 'whisper' | 'soniox';
 export type AsrLanguageId = 'auto' | 'en' | 'fr' | 'ar';
 
 export type TranscriptLine = {

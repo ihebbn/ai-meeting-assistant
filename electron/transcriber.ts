@@ -28,6 +28,7 @@ import {
   isWhisperReady,
   transcribeWithWhisper,
 } from './asr/whisper-backend';
+import { hasSonioxApiKey } from './asr/soniox-secrets';
 
 export type TranscriptResult = {
   text: string;
@@ -80,6 +81,23 @@ export function isCompareMode(): boolean {
 }
 
 export function getTranscriberStatus(): TranscriberStatus {
+  if (backend === 'soniox') {
+    const ready = hasSonioxApiKey();
+    return {
+      backend,
+      language,
+      compareMode,
+      ready,
+      loading: false,
+      error: ready
+        ? null
+        : 'Add SONIOX_API_KEY to the gitignored .env file and restart. The key stays out of the overlay.',
+      modelLabel: BACKEND_LABELS.soniox,
+      languageLabel: 'en · fr · de · ar',
+      qwenSetup: getQwenSetupState(),
+      acceptanceDefaultUnlocked: QWEN_ACCEPTANCE_PASSED,
+    };
+  }
   const activeReady = backend === 'qwen' ? isQwenReady() : isWhisperReady();
   const activeLoading = backend === 'qwen' ? isQwenLoading() : isWhisperLoading();
   const activeError =
@@ -135,7 +153,7 @@ function setupErrorMessage(): string | null {
 }
 
 export function setAsrBackend(next: AsrBackendId): TranscriberStatus {
-  if (next === 'qwen' || next === 'whisper') {
+  if (next === 'qwen' || next === 'whisper' || next === 'soniox') {
     backend = next;
     if (next === 'qwen') {
       setupWarning = null;
@@ -181,6 +199,15 @@ export function getTranscriberModelId(): string {
 }
 
 export async function ensureTranscriber(): Promise<void> {
+  if (backend === 'soniox') {
+    emitStatus();
+    if (!hasSonioxApiKey()) {
+      throw new Error(
+        'SONIOX_API_KEY is missing. Add it to the gitignored .env file and restart Meeting Copilot.',
+      );
+    }
+    return;
+  }
   if (backend === 'qwen') {
     try {
       await ensureQwenBackend();
@@ -209,6 +236,9 @@ export async function transcribePcm(
   pcm: Float32Array,
   sampleRate: number,
 ): Promise<TranscriptResult> {
+  if (backend === 'soniox') {
+    return { text: '', language: null, latencyMs: 0, backend: 'soniox' };
+  }
   if (compareMode) {
     return transcribeCompare(pcm, sampleRate);
   }
@@ -266,18 +296,31 @@ async function transcribeCompare(
 
 /** Warm preferred backends without failing app startup. */
 export async function warmTranscriber(): Promise<void> {
+  if (getAsrBackend() === 'soniox') {
+    return;
+  }
   if (DEFAULT_ASR_BACKEND === 'qwen' && (QWEN_ACCEPTANCE_PASSED || getQwenSetupState().status === 'ready')) {
     backend = 'qwen';
     try {
       await ensureQwenBackend();
+      if (getAsrBackend() === 'soniox') {
+        return;
+      }
       emitStatus();
       return;
     } catch {
-      backend = 'whisper';
+      if (getAsrBackend() !== 'soniox') {
+        backend = 'whisper';
+      }
     }
   } else if (!QWEN_ACCEPTANCE_PASSED && getQwenSetupState().status !== 'ready') {
     // Keep Whisper warm until the operator finishes Qwen acceptance.
-    backend = 'whisper';
+    if (getAsrBackend() !== 'soniox') {
+      backend = 'whisper';
+    }
+  }
+  if (getAsrBackend() === 'soniox') {
+    return;
   }
   await ensureWhisperBackend(language);
   emitStatus();

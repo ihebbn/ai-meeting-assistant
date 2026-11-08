@@ -3,6 +3,7 @@
  * Protocol: parent <-> child JSON messages over IPC.
  */
 import * as path from 'path';
+import { cleanupCaption } from './caption-text';
 
 type InitMessage = {
   type: 'init';
@@ -14,7 +15,7 @@ type TranscribeMessage = {
   id: number;
   sampleRate: number;
   languageHint: string | null;
-  pcm: number[];
+  pcm: Float32Array | number[];
 };
 
 type CancelMessage = {
@@ -68,36 +69,22 @@ function loadRecognizer(modelDir: string): void {
         maxNewTokens: 96,
       },
       tokens: '',
-      numThreads: 2,
+      numThreads: 4,
       provider: 'cpu',
       debug: 0,
     },
   });
 }
 
-function cleanupTranscript(text: string): string {
-  const cleaned = text
-    .replace(/\*[^*]*\*/g, ' ')
-    .replace(/\[[^\]]*\]/g, ' ')
-    .replace(/\([^)]*\)/g, ' ')
-    .replace(
-      /\b(uh|um|erm|inaudible|music|blank_audio|gibberish|clicks?|clicking|sighs?)\b/gi,
-      ' ',
-    )
-    .replace(/\s+/g, ' ')
-    .replace(/^[,.\s]+|[,.\s]+$/g, '')
-    .trim();
-  if (!cleaned) {
-    return '';
+function asFloat32(pcm: Float32Array | number[]): Float32Array {
+  if (pcm instanceof Float32Array) {
+    return pcm;
   }
-  if (
-    /^(thanks for watching!?|thank you for watching!?|thanks for listening!?|please subscribe)/i.test(
-      cleaned,
-    )
-  ) {
-    return '';
+  const out = new Float32Array(pcm.length);
+  for (let i = 0; i < pcm.length; i += 1) {
+    out[i] = Number(pcm[i]) || 0;
   }
-  return cleaned;
+  return out;
 }
 
 function inferLanguage(
@@ -163,7 +150,7 @@ async function drainQueue(): Promise<void> {
       }
       const started = Date.now();
       try {
-        const pcm = Float32Array.from(job.pcm);
+        const pcm = asFloat32(job.pcm);
         const stream = recognizer.createStream();
         if (job.languageHint && stream.setOption) {
           stream.setOption('language', job.languageHint);
@@ -172,7 +159,7 @@ async function drainQueue(): Promise<void> {
         recognizer.decode(stream);
         const result = recognizer.getResult(stream);
         stream.free?.();
-        const cleaned = cleanupTranscript(String(result?.text || ''));
+        const cleaned = cleanupCaption(String(result?.text || ''));
         const language = cleaned ? inferLanguage(result || {}, cleaned) : null;
         send({
           type: 'result',

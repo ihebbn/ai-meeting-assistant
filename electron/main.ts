@@ -40,6 +40,13 @@ import {
   streamMeetingAnswer,
 } from './ai/gemini';
 import { bootstrapGeminiApiKey } from './ai/secrets';
+import { bootstrapSonioxApiKey, getSonioxApiKey } from './asr/soniox-secrets';
+import {
+  sendSonioxPcm,
+  startSoniox,
+  stopSoniox,
+  type SonioxSource,
+} from './asr/soniox-session';
 import {
   appendRollingTranscript,
   decideContextNeed,
@@ -703,19 +710,44 @@ function logTranscriptResult(source: string, result: TranscriptResult): void {
   if (!result.text && !result.compare?.length) {
     return;
   }
+  // Length and timing only — transcript text stays out of the log by default.
   if (result.compare?.length) {
-    for (const item of result.compare) {
-      appendLog(
-        'info',
-        `Compare ${source}/${item.backend}${item.language ? ` [${item.language}]` : ''} ${item.latencyMs}ms: ${(item.text || '(blank)').slice(0, 80)}`,
-      );
-    }
+    const summary = result.compare
+      .map(
+        (item) =>
+          `${item.backend}${item.language ? `/${item.language}` : ''} ${item.latencyMs}ms/${(item.text || '').length}c`,
+      )
+      .join(', ');
+    appendLog('info', `Transcribed ${source}: ${summary}`);
     return;
   }
   appendLog(
     'info',
-    `Transcribed ${source}/${result.backend}${result.language ? ` [${result.language}]` : ''} ${result.latencyMs}ms: ${result.text.slice(0, 80)}${result.text.length > 80 ? '…' : ''}`,
+    `Transcribed ${source}/${result.backend}${result.language ? `/${result.language}` : ''} ${result.latencyMs}ms/${result.text.length}c`,
   );
+}
+
+function coercePcm(value: unknown): Float32Array {
+  if (value instanceof Float32Array) {
+    return value;
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Float32Array(value);
+  }
+  if (ArrayBuffer.isView(value)) {
+    const view = value as ArrayBufferView;
+    const copy = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+    return new Float32Array(copy);
+  }
+  if (Array.isArray(value)) {
+    const out = new Float32Array(value.length);
+    for (let i = 0; i < value.length; i += 1) {
+      const sample = Number(value[i]);
+      out[i] = Number.isFinite(sample) ? sample : 0;
+    }
+    return out;
+  }
+  return new Float32Array();
 }
 
 function syncAsrSessionFields(): void {
@@ -726,6 +758,67 @@ function syncAsrSessionFields(): void {
   session.asrModelLabel = status.modelLabel;
   session.asrSetupMessage = status.error;
   session.modelReady = status.ready;
+}
+
+function sonioxSpeaker(source: SonioxSource): string {
+  return source === 'you' ? 'You' : 'System audio';
+}
+
+function sonioxLiveId(source: SonioxSource): string {
+  return source === 'you' ? 'you-interim-soniox' : 'system-interim-soniox';
+}
+
+function applySonioxLive(source: SonioxSource, text: string, language: string | null): void {
+  const id = sonioxLiveId(source);
+  const cleaned = text.replace(/[ \t]+/g, ' ').trim();
+  if (!cleaned) {
+    const before = session.transcript.length;
+    session.transcript = session.transcript.filter((item) => item.id !== id);
+    if (session.transcript.length !== before) {
+      broadcastSession();
+    }
+    return;
+  }
+  const line = {
+    id,
+    speaker: sonioxSpeaker(source),
+    text: cleaned,
+    language,
+    backend: 'soniox' as const,
+  };
+  const existing = session.transcript.findIndex((item) => item.id === id);
+  if (existing >= 0) {
+    session.transcript = session.transcript.map((item, index) =>
+      index === existing ? { ...item, ...line } : item,
+    );
+  } else {
+    session.transcript = [...session.transcript, line].slice(-200);
+  }
+  if (language) {
+    session.detectedLanguage = language;
+  }
+  broadcastSession();
+}
+
+function commitSonioxLine(source: SonioxSource, text: string, language: string | null): void {
+  const cleaned = text.replace(/[ \t]+/g, ' ').trim();
+  if (!cleaned) {
+    return;
+  }
+  session.transcript = appendRollingTranscript(session.transcript, {
+    id: `soniox-${source}-${Date.now()}-${session.transcript.length}`,
+    speaker: sonioxSpeaker(source),
+    text: cleaned,
+    at: new Date().toISOString(),
+    language,
+    backend: 'soniox',
+    latencyMs: null,
+  });
+  if (language) {
+    session.detectedLanguage = language;
+  }
+  broadcastSession();
+  scheduleMeetingInsights();
 }
 
 function setListening(listening: boolean): void {
@@ -758,6 +851,7 @@ function setListening(listening: boolean): void {
       systemActive: false,
     };
     appendLog('info', 'Listening stopped — audio streams released; stale ASR discarded.');
+    void stopSoniox();
   }
   broadcastSession();
 }
@@ -1257,7 +1351,14 @@ function registerIpc(): void {
       payload: { status: ListenStatus; error: string | null; modelReady: boolean },
     ) => {
       session.listenStatus = payload?.status ?? session.listenStatus;
-      session.listenError = payload?.error ? String(payload.error) : null;
+      const incomingError = payload?.error ? String(payload.error) : null;
+      const keepSonioxError =
+        !incomingError &&
+        payload?.status === 'listening' &&
+        !!session.listenError?.startsWith('Soniox');
+      if (!keepSonioxError) {
+        session.listenError = incomingError;
+      }
       session.modelReady = !!payload?.modelReady || isTranscriberReady();
       if (session.listenError) {
         appendLog('warn', `Listen status: ${session.listenStatus} — ${session.listenError}`);
@@ -1370,6 +1471,68 @@ function registerIpc(): void {
     return getTranscriberStatus();
   });
 
+  ipcMain.handle('listen:soniox-start', async (_event, requested: unknown) => {
+    const key = getSonioxApiKey();
+    if (!key) {
+      return {
+        ok: false,
+        error:
+          'SONIOX_API_KEY is missing. Add it to the gitignored .env file and restart Meeting Copilot.',
+      };
+    }
+    const sources = Array.isArray(requested)
+      ? requested.filter(
+          (item): item is SonioxSource => item === 'you' || item === 'system',
+        )
+      : [];
+    try {
+      const started = await startSoniox(
+        key,
+        sources.length ? sources : ['you', 'system'],
+        {
+        onLive: (source, text, language) => applySonioxLive(source, text, language),
+        onCommit: (source, text, language) => commitSonioxLine(source, text, language),
+        onError: (source, message) => {
+          appendLog('warn', `Soniox ${source}: ${message}`);
+          session.listenError = message;
+          broadcastSession();
+        },
+        onDiag: (line) => {
+          if (isDev) {
+            appendLog('info', line);
+          }
+        },
+      });
+      const opened = sources.length ? sources : ['you', 'system'];
+      appendLog('info', `Soniox stt-rt-v6 connected for ${opened.join(' and ')}.`);
+      return { ok: true, error: started.error };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      appendLog('error', `Soniox start failed: ${message}`);
+      return { ok: false, error: message };
+    }
+  });
+
+  ipcMain.handle('listen:soniox-stop', async () => {
+    await stopSoniox();
+    return true;
+  });
+
+  ipcMain.on(
+    'listen:soniox-audio',
+    (_event, payload: { source?: SonioxSource; pcm?: unknown }) => {
+      const source = payload?.source === 'system' || payload?.source === 'you' ? payload.source : null;
+      if (!source) {
+        return;
+      }
+      const pcm = coercePcm(payload?.pcm);
+      if (!pcm.length) {
+        return;
+      }
+      sendSonioxPcm(source, pcm);
+    },
+  );
+
   ipcMain.handle('listen:set-asr-backend', (_e, next: AsrBackendId) => {
     setAsrBackend(next);
     syncAsrSessionFields();
@@ -1412,13 +1575,9 @@ function registerIpc(): void {
     'listen:transcribe-pcm',
     async (
       _e,
-      payload: { source: 'you' | 'system'; sampleRate: number; pcm: number[] },
+      payload: { source: 'you' | 'system'; sampleRate: number; pcm: Float32Array | number[] },
     ) => {
-      const values = payload?.pcm ?? [];
-      const pcm = new Float32Array(values.length);
-      for (let i = 0; i < values.length; i += 1) {
-        pcm[i] = Number(values[i]) || 0;
-      }
+      const pcm = coercePcm(payload?.pcm);
       const sampleRate = Number(payload?.sampleRate) || 16000;
       if (!pcm.length) {
         return emptyTranscriptResult();
@@ -1627,6 +1786,13 @@ app.whenReady().then(() => {
     geminiReady
       ? 'Gemini API key loaded — Ask AI uses transcript + Watch Screen context.'
       : 'Gemini API key missing — add GEMINI_API_KEY to .env and restart.',
+  );
+  const sonioxReady = !!bootstrapSonioxApiKey();
+  appendLog(
+    'info',
+    sonioxReady
+      ? 'Soniox API key loaded — selectable as a live transcription provider.'
+      : 'Soniox API key missing — add SONIOX_API_KEY to .env and restart.',
   );
   if (geminiReady) {
     session.actions = defaultMeetingActions();
