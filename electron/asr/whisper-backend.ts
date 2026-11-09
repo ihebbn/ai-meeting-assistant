@@ -1,5 +1,6 @@
 import * as path from 'path';
 import { app } from 'electron';
+import { cleanupCaption } from './caption-text';
 import type { AsrLanguageId } from './constants';
 
 type AsrPipeline = (
@@ -140,7 +141,7 @@ export async function transcribeWithWhisper(
     if (generation !== listenGeneration) {
       return { text: '', language: null, latencyMs: 0, backend: 'whisper' };
     }
-    const text = cleanupTranscript(
+    const text = cleanupCaption(
       Array.isArray(result)
         ? result.map((r) => r.text ?? '').join(' ')
         : (result.text ?? ''),
@@ -227,16 +228,3 @@ function normalizePcm(pcm: Float32Array, targetPeak = 0.8): Float32Array {
   return out;
 }
 
-function cleanupTranscript(text: string): string {
-  return text
-    .replace(/\*[^*]*\*/g, ' ')
-    .replace(/\[[^\]]*\]/g, ' ')
-    .replace(/\([^)]*\)/g, ' ')
-    .replace(
-      /\b(uh|um|erm|inaudible|music|blank_audio|gibberish|clicks?|clicking|sighs?)\b/gi,
-      ' ',
-    )
-    .replace(/\s+/g, ' ')
-    .replace(/^[,.\s]+|[,.\s]+$/g, '')
-    .trim();
-}

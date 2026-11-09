@@ -8,6 +8,8 @@ import {
   session as electronSession,
   shell,
 } from 'electron';
+import type { ScreenFrame } from './ai/screen-capture';
+import { capturePrimaryScreen } from './ai/screen-capture';
 import { initMain as initAudioLoopback } from 'electron-audio-loopback';
 import * as fs from 'fs';
 import * as os from 'os';
@@ -30,6 +32,33 @@ import {
   clampPanelSize,
   createInitialSession,
 } from './session';
+import {
+  analyzeMeeting,
+  defaultMeetingActions,
+  formatGeminiUserError,
+  isGeminiConfigured,
+  streamMeetingAnswer,
+} from './ai/gemini';
+import { bootstrapGeminiApiKey } from './ai/secrets';
+import { bootstrapSonioxApiKey, getSonioxApiKey } from './asr/soniox-secrets';
+import {
+  sendSonioxPcm,
+  startSoniox,
+  stopSoniox,
+  type SonioxSource,
+} from './asr/soniox-session';
+import {
+  appendRollingTranscript,
+  decideContextNeed,
+  dedupeInsightActions,
+  getLatestScreenFrame,
+  getScreenHistory,
+  packageContextForAsk,
+  rememberScreenFrame,
+  resolveAskRequest,
+  type AskOrigin,
+  type AskRequest,
+} from './ai/session-context';
 import {
   bumpListenGeneration,
   ensureTranscriber,
@@ -98,6 +127,8 @@ let logFilePath = '';
 let elapsedTimer: NodeJS.Timeout | null = null;
 let streamTimer: NodeJS.Timeout | null = null;
 let streamToken = 0;
+let askInFlight = false;
+let askEpoch = 0;
 type MenuAnchor = {
   top: number;
   right: number;
@@ -120,12 +151,9 @@ function appendLog(level: LogEntry['level'], message: string): void {
     logEntries.shift();
   }
   const line = `[${entry.ts}] ${level.toUpperCase()} ${message}\n`;
-  try {
-    if (logFilePath) {
-      fs.appendFileSync(logFilePath, line, 'utf8');
-    }
-  } catch {
-    // Keep in-memory log even if disk write fails.
+  // Async disk write — sync I/O was stalling click handlers (Insights / Listen).
+  if (logFilePath) {
+    fs.appendFile(logFilePath, line, 'utf8', () => undefined);
   }
   if (diagnosticsWindow && !diagnosticsWindow.isDestroyed()) {
     diagnosticsWindow.webContents.send('diagnostics:log', entry);
@@ -168,6 +196,9 @@ function loadRoute(win: BrowserWindow, route: string): void {
 function applyContentProtection(win: BrowserWindow, name: SurfaceName): void {
   contentProtection.requested = CONTENT_PROTECTION_ENABLED;
   contentProtection.enabledForDesignCapture = !CONTENT_PROTECTION_ENABLED;
+  const already =
+    contentProtection.windows[name] === CONTENT_PROTECTION_ENABLED &&
+    contentProtection.lastError == null;
   try {
     win.setContentProtection(CONTENT_PROTECTION_ENABLED);
     contentProtection.windows[name] = CONTENT_PROTECTION_ENABLED;
@@ -176,12 +207,15 @@ function applyContentProtection(win: BrowserWindow, name: SurfaceName): void {
       : false;
     contentProtection.lastError = null;
     contentProtection.appliedAt = nowIso();
-    appendLog(
-      'info',
-      CONTENT_PROTECTION_ENABLED
-        ? `setContentProtection(true) on ${name}.`
-        : `Content protection OFF on ${name} (design screenshots enabled).`,
-    );
+    // Avoid flooding the log (and the disk) on every layout/visibility pass.
+    if (!already) {
+      appendLog(
+        'info',
+        CONTENT_PROTECTION_ENABLED
+          ? `setContentProtection(true) on ${name}.`
+          : `Content protection OFF on ${name} (design screenshots enabled).`,
+      );
+    }
   } catch (err) {
     contentProtection.windows[name] = false;
     contentProtection.applied = false;
@@ -203,6 +237,9 @@ function getPublicSession() {
   };
 }
 
+let audioBroadcastTimer: ReturnType<typeof setTimeout> | null = null;
+let audioBroadcastPending = false;
+
 function broadcastSession(): void {
   const payload = getPublicSession();
   for (const win of [overlayWindow, diagnosticsWindow]) {
@@ -210,6 +247,22 @@ function broadcastSession(): void {
       win.webContents.send('session:updated', payload);
     }
   }
+}
+
+/** Coalesce meter updates so the overlay is not redrawn 12×/sec while listening. */
+function scheduleAudioBroadcast(): void {
+  audioBroadcastPending = true;
+  if (audioBroadcastTimer) {
+    return;
+  }
+  audioBroadcastTimer = setTimeout(() => {
+    audioBroadcastTimer = null;
+    if (!audioBroadcastPending) {
+      return;
+    }
+    audioBroadcastPending = false;
+    broadcastSession();
+  }, 180);
 }
 
 function workArea() {
@@ -437,7 +490,7 @@ function applyOverlayBounds(preserveCenter = false): void {
   overlayWindow.setBounds({ x, y, width: size.width, height: size.height });
 }
 
-function applyVisibility(options?: { center?: boolean }): void {
+function applyVisibility(options?: { center?: boolean; broadcast?: boolean }): void {
   if (!overlayWindow || overlayWindow.isDestroyed()) {
     return;
   }
@@ -447,11 +500,21 @@ function applyVisibility(options?: { center?: boolean }): void {
   if (!overlayWindow.isVisible()) {
     overlayWindow.showInactive();
   }
-  broadcastSession();
+  if (options?.broadcast !== false) {
+    broadcastSession();
+  }
 }
+
+/** While true, ignore blur/focus opacity nudges (screen capture steals focus on Windows). */
+let suppressOverlayFocusFx = false;
 
 function forceOverlayTransparency(win: BrowserWindow, reason: string): void {
   if (win.isDestroyed()) {
+    return;
+  }
+  // desktopCapturer briefly blurs the overlay; opacity nudges make the toolbar
+  // appear/disappear. Skip those while Watch Screen / Ask is grabbing frames.
+  if (suppressOverlayFocusFx && (reason === 'blur' || reason.startsWith('blur-'))) {
     return;
   }
   try {
@@ -647,19 +710,44 @@ function logTranscriptResult(source: string, result: TranscriptResult): void {
   if (!result.text && !result.compare?.length) {
     return;
   }
+  // Length and timing only — transcript text stays out of the log by default.
   if (result.compare?.length) {
-    for (const item of result.compare) {
-      appendLog(
-        'info',
-        `Compare ${source}/${item.backend}${item.language ? ` [${item.language}]` : ''} ${item.latencyMs}ms: ${(item.text || '(blank)').slice(0, 80)}`,
-      );
-    }
+    const summary = result.compare
+      .map(
+        (item) =>
+          `${item.backend}${item.language ? `/${item.language}` : ''} ${item.latencyMs}ms/${(item.text || '').length}c`,
+      )
+      .join(', ');
+    appendLog('info', `Transcribed ${source}: ${summary}`);
     return;
   }
   appendLog(
     'info',
-    `Transcribed ${source}/${result.backend}${result.language ? ` [${result.language}]` : ''} ${result.latencyMs}ms: ${result.text.slice(0, 80)}${result.text.length > 80 ? '…' : ''}`,
+    `Transcribed ${source}/${result.backend}${result.language ? `/${result.language}` : ''} ${result.latencyMs}ms/${result.text.length}c`,
   );
+}
+
+function coercePcm(value: unknown): Float32Array {
+  if (value instanceof Float32Array) {
+    return value;
+  }
+  if (value instanceof ArrayBuffer) {
+    return new Float32Array(value);
+  }
+  if (ArrayBuffer.isView(value)) {
+    const view = value as ArrayBufferView;
+    const copy = view.buffer.slice(view.byteOffset, view.byteOffset + view.byteLength);
+    return new Float32Array(copy);
+  }
+  if (Array.isArray(value)) {
+    const out = new Float32Array(value.length);
+    for (let i = 0; i < value.length; i += 1) {
+      const sample = Number(value[i]);
+      out[i] = Number.isFinite(sample) ? sample : 0;
+    }
+    return out;
+  }
+  return new Float32Array();
 }
 
 function syncAsrSessionFields(): void {
@@ -670,6 +758,67 @@ function syncAsrSessionFields(): void {
   session.asrModelLabel = status.modelLabel;
   session.asrSetupMessage = status.error;
   session.modelReady = status.ready;
+}
+
+function sonioxSpeaker(source: SonioxSource): string {
+  return source === 'you' ? 'You' : 'System audio';
+}
+
+function sonioxLiveId(source: SonioxSource): string {
+  return source === 'you' ? 'you-interim-soniox' : 'system-interim-soniox';
+}
+
+function applySonioxLive(source: SonioxSource, text: string, language: string | null): void {
+  const id = sonioxLiveId(source);
+  const cleaned = text.replace(/[ \t]+/g, ' ').trim();
+  if (!cleaned) {
+    const before = session.transcript.length;
+    session.transcript = session.transcript.filter((item) => item.id !== id);
+    if (session.transcript.length !== before) {
+      broadcastSession();
+    }
+    return;
+  }
+  const line = {
+    id,
+    speaker: sonioxSpeaker(source),
+    text: cleaned,
+    language,
+    backend: 'soniox' as const,
+  };
+  const existing = session.transcript.findIndex((item) => item.id === id);
+  if (existing >= 0) {
+    session.transcript = session.transcript.map((item, index) =>
+      index === existing ? { ...item, ...line } : item,
+    );
+  } else {
+    session.transcript = [...session.transcript, line].slice(-200);
+  }
+  if (language) {
+    session.detectedLanguage = language;
+  }
+  broadcastSession();
+}
+
+function commitSonioxLine(source: SonioxSource, text: string, language: string | null): void {
+  const cleaned = text.replace(/[ \t]+/g, ' ').trim();
+  if (!cleaned) {
+    return;
+  }
+  session.transcript = appendRollingTranscript(session.transcript, {
+    id: `soniox-${source}-${Date.now()}-${session.transcript.length}`,
+    speaker: sonioxSpeaker(source),
+    text: cleaned,
+    at: new Date().toISOString(),
+    language,
+    backend: 'soniox',
+    latencyMs: null,
+  });
+  if (language) {
+    session.detectedLanguage = language;
+  }
+  broadcastSession();
+  scheduleMeetingInsights();
 }
 
 function setListening(listening: boolean): void {
@@ -702,6 +851,7 @@ function setListening(listening: boolean): void {
       systemActive: false,
     };
     appendLog('info', 'Listening stopped — audio streams released; stale ASR discarded.');
+    void stopSoniox();
   }
   broadcastSession();
 }
@@ -725,6 +875,7 @@ function stopElapsedTimer(): void {
 }
 
 function stopStreaming(): void {
+  // Bump token so any in-flight Gemini stream ignores remaining chunks.
   streamToken += 1;
   if (streamTimer) {
     clearInterval(streamTimer);
@@ -732,47 +883,367 @@ function stopStreaming(): void {
   }
 }
 
-function streamAnswer(question: string, fullAnswer: string): void {
+function beginAssistantTurn(question: string): { token: number; assistantId: string } {
   stopStreaming();
   const token = ++streamToken;
   const assistantId = `a-${Date.now()}`;
   session.currentQuestion = question;
   session.messages = [
     { id: `u-${Date.now()}`, role: 'user', text: question },
-    { id: assistantId, role: 'assistant', text: '', streaming: true },
+    {
+      id: assistantId,
+      role: 'assistant',
+      text: '',
+      streaming: true,
+      usedConversation: false,
+      usedScreen: false,
+    },
   ];
   session.responseOpen = true;
   session.panelsHidden = false;
   applyVisibility();
+  broadcastSession();
+  return { token, assistantId };
+}
 
-  let index = 0;
-  const chars = fullAnswer.split('');
-  streamTimer = setInterval(() => {
+function patchAssistant(
+  assistantId: string,
+  token: number,
+  text: string,
+  streaming: boolean,
+  sources?: { usedConversation?: boolean; usedScreen?: boolean },
+): void {
+  if (token !== streamToken) {
+    return;
+  }
+  session.messages = session.messages.map((m) =>
+    m.id === assistantId
+      ? {
+          ...m,
+          text,
+          streaming,
+          usedConversation: sources?.usedConversation ?? m.usedConversation,
+          usedScreen: sources?.usedScreen ?? m.usedScreen,
+        }
+      : m,
+  );
+  broadcastSession();
+}
+
+function askFromOrigin(
+  origin: AskOrigin,
+  typedPrompt?: string,
+  actionId?: string,
+  actionLabel?: string,
+): void {
+  const request = resolveAskRequest({
+    origin,
+    typedPrompt,
+    actionId,
+    actionLabel,
+    transcript: session.transcript,
+    insightActions: session.actions,
+  });
+  session.followUpDraft = '';
+  appendLog(
+    'info',
+    `Ask AI (${request.origin}${request.explicit ? '/explicit' : '/inferred'}): ${request.prompt.slice(0, 120)}`,
+  );
+  void answerWithGemini(request);
+}
+
+/** Back-compat helper for typed prompts / labeled actions. */
+function askWithPrompt(prompt: string, actionId?: string): void {
+  const trimmed = prompt.trim();
+  if (!trimmed && !actionId) {
+    askFromOrigin('shortcut');
+    return;
+  }
+  askFromOrigin(actionId ? 'insight' : 'typed', trimmed, actionId, trimmed);
+}
+
+let screenWatchTimer: ReturnType<typeof setInterval> | null = null;
+let screenWatchInFlight = false;
+
+function syncScreenWatchLoop(): void {
+  if (session.screenVisionEnabled && !screenWatchTimer) {
+    // Slow background polls — frequent desktopCapturer calls steal focus on
+    // Windows and make the transparent toolbar blink.
+    screenWatchTimer = setInterval(() => {
+      void watchScreenTick();
+    }, 12_000);
+    // Defer the first grab so startup focus settles.
+    setTimeout(() => void watchScreenTick(), 1500);
+    appendLog('info', 'Watch Screen loop started (capture does not hide the toolbar).');
+  }
+  if (!session.screenVisionEnabled && screenWatchTimer) {
+    clearInterval(screenWatchTimer);
+    screenWatchTimer = null;
+    appendLog('info', 'Watch Screen loop stopped.');
+  }
+}
+
+async function watchScreenTick(): Promise<void> {
+  if (!session.screenVisionEnabled || screenWatchInFlight) {
+    return;
+  }
+  screenWatchInFlight = true;
+  // Yield so pending click IPC (Insights / Listen) runs before desktopCapturer.
+  await new Promise<void>((resolve) => setImmediate(resolve));
+  try {
+    await grabScreenFrame({ force: false, quiet: true });
+  } finally {
+    screenWatchInFlight = false;
+  }
+}
+
+async function grabScreenFrame(options?: {
+  force?: boolean;
+  quiet?: boolean;
+}): Promise<ScreenFrame | null> {
+  if (!session.screenVisionEnabled && !options?.force) {
+    return getLatestScreenFrame();
+  }
+  // Never hide/cloak the overlay. Suppress blur opacity nudges while
+  // desktopCapturer runs so the toolbar does not appear/disappear.
+  suppressOverlayFocusFx = true;
+  try {
+    const previous = getLatestScreenFrame();
+    const frame = await capturePrimaryScreen({
+      maxWidth: 1280,
+      maxHeight: 720,
+      quality: 72,
+      previousSignature: previous?.signature,
+    });
+    if (frame) {
+      const changed = !previous || frame.changed;
+      rememberScreenFrame(frame, changed);
+      session.lastScreenCaptureAt = frame.capturedAt;
+      session.screenVisionError = null;
+      if (!options?.quiet && changed) {
+        appendLog(
+          'info',
+          `Screen changed — kept frame ${frame.width}×${frame.height} (${frame.label}).`,
+        );
+      }
+      // Avoid re-rendering the whole overlay on every quiet tick.
+      if (changed || !options?.quiet || !previous) {
+        broadcastSession();
+      }
+      if (frame.changed) {
+        scheduleMeetingInsights(true);
+      }
+    } else {
+      session.screenVisionError = 'Screen capture returned an empty frame.';
+      broadcastSession();
+    }
+    return frame || getLatestScreenFrame();
+  } catch (err) {
+    session.screenVisionError = String(err);
+    broadcastSession();
+    if (!options?.quiet) {
+      appendLog('warn', `Screen capture failed: ${String(err)}`);
+    }
+    return getLatestScreenFrame();
+  } finally {
+    // Keep the toolbar visible without stealing focus back.
+    if (overlayWindow && !overlayWindow.isDestroyed() && !overlayWindow.isVisible()) {
+      overlayWindow.showInactive();
+    }
+    // Keep suppression briefly — blur events often arrive after getSources resolves.
+    setTimeout(() => {
+      suppressOverlayFocusFx = false;
+    }, 500);
+  }
+}
+
+async function answerWithGemini(request: AskRequest): Promise<void> {
+  const { token, assistantId } = beginAssistantTurn(request.prompt);
+  const epoch = ++askEpoch;
+  askInFlight = true;
+  if (!isGeminiConfigured()) {
+    patchAssistant(assistantId, token, answerForPrompt(request.prompt, request.actionId), false);
+    appendLog('warn', 'Ask AI blocked — Gemini API key is not configured.');
+    if (epoch === askEpoch) {
+      askInFlight = false;
+    }
+    return;
+  }
+
+  const need = decideContextNeed(request);
+  patchAssistant(
+    assistantId,
+    token,
+    need === 'screen'
+      ? 'Reading the screen…'
+      : need === 'transcript'
+        ? 'Reading the conversation…'
+        : need === 'both'
+          ? 'Reading screen + conversation…'
+          : 'Thinking…',
+    true,
+  );
+
+  try {
+    // Always refresh the frame for screen-aware asks (stale “unchanged” frames
+    // caused wrong answers when a QCM was already open).
+    if (need === 'screen' || need === 'both') {
+      await grabScreenFrame({ force: true, quiet: true });
+    }
     if (token !== streamToken) {
       return;
     }
-    index = Math.min(chars.length, index + 3);
-    const partial = chars.slice(0, index).join('');
-    session.messages = session.messages.map((m) =>
-      m.id === assistantId
-        ? { ...m, text: partial, streaming: index < chars.length }
-        : m,
-    );
-    broadcastSession();
-    if (index >= chars.length) {
-      stopStreaming();
+
+    const packaged = packageContextForAsk({
+      need,
+      transcript: session.transcript,
+      screenVisionEnabled: true,
+      latestScreen: getLatestScreenFrame(),
+      history: getScreenHistory(),
+    });
+
+    if ((need === 'screen' || need === 'both') && !packaged.screen) {
+      const ephemeral = await grabScreenFrame({ force: true, quiet: true });
+      if (ephemeral) {
+        packaged.screen = ephemeral;
+        packaged.usedScreen = true;
+      }
     }
-  }, 18);
+
+    if ((need === 'screen' || need === 'both') && !packaged.screen) {
+      patchAssistant(
+        assistantId,
+        token,
+        'I can’t see your screen right now. Keep the quiz/QCM visible, leave Watch Screen on, then ask again.',
+        false,
+        { usedConversation: packaged.usedConversation, usedScreen: false },
+      );
+      return;
+    }
+
+    patchAssistant(
+      assistantId,
+      token,
+      packaged.usedScreen
+        ? 'Asking Gemini about the screen…'
+        : packaged.usedConversation
+          ? 'Asking Gemini about the conversation…'
+          : 'Asking Gemini…',
+      true,
+      {
+        usedConversation: packaged.usedConversation,
+        usedScreen: packaged.usedScreen,
+      },
+    );
+
+    let sawToken = false;
+    const finalText = await streamMeetingAnswer({
+      request,
+      context: packaged,
+      handlers: {
+        shouldCancel: () => token !== streamToken,
+        onToken: (partial) => {
+          sawToken = true;
+          patchAssistant(assistantId, token, partial, true, {
+            usedConversation: packaged.usedConversation,
+            usedScreen: packaged.usedScreen,
+          });
+        },
+      },
+    });
+    if (!sawToken && token === streamToken) {
+      appendLog('warn', 'Gemini returned no visible text tokens.');
+    }
+    if (token !== streamToken) {
+      return;
+    }
+    patchAssistant(
+      assistantId,
+      token,
+      finalText || 'No answer returned. Capture more transcript or screen, then try again.',
+      false,
+      {
+        usedConversation: packaged.usedConversation,
+        usedScreen: packaged.usedScreen,
+      },
+    );
+    appendLog(
+      'info',
+      `Ask AI done (${finalText.length} chars, conversation=${packaged.usedConversation}, screen=${packaged.usedScreen}, need=${need}).`,
+    );
+  } catch (err) {
+    if (token !== streamToken) {
+      return;
+    }
+    const message = formatGeminiUserError(err);
+    patchAssistant(assistantId, token, message, false);
+    appendLog('error', `Ask AI failed: ${String(err)}`);
+  } finally {
+    if (epoch === askEpoch) {
+      askInFlight = false;
+    }
+  }
 }
 
-function askWithPrompt(prompt: string, actionId?: string): void {
-  const trimmed = prompt.trim();
-  if (!trimmed) {
+let insightsTimer: ReturnType<typeof setTimeout> | null = null;
+let insightsInFlight = false;
+let lastInsightsCount = 0;
+
+function scheduleMeetingInsights(fromScreenChange = false): void {
+  if (!isGeminiConfigured()) {
     return;
   }
-  session.followUpDraft = '';
-  appendLog('info', `Ask AI: ${trimmed}`);
-  streamAnswer(trimmed, answerForPrompt(trimmed, actionId));
+  if (!fromScreenChange) {
+    if (session.transcript.length < 2) {
+      return;
+    }
+    if (session.transcript.length - lastInsightsCount < 2) {
+      return;
+    }
+  }
+  if (insightsTimer) {
+    clearTimeout(insightsTimer);
+  }
+  insightsTimer = setTimeout(() => {
+    void refreshMeetingInsights();
+  }, fromScreenChange ? 2800 : 4500);
+}
+
+async function refreshMeetingInsights(): Promise<void> {
+  if (insightsInFlight || askInFlight || !isGeminiConfigured()) {
+    return;
+  }
+  if (session.transcript.length < 2 && !getLatestScreenFrame()) {
+    return;
+  }
+  insightsInFlight = true;
+  const snapshotCount = session.transcript.length;
+  try {
+    const screenFrame = session.screenVisionEnabled ? getLatestScreenFrame() : null;
+    const insights = await analyzeMeeting(session.transcript, screenFrame);
+    if (!insights) {
+      return;
+    }
+    session.topic = insights.topic || session.topic;
+    session.recap = insights.recap.length ? insights.recap : session.recap;
+    const fresh = dedupeInsightActions(
+      insights.actions.length ? insights.actions : defaultMeetingActions(),
+    );
+    // Keep prior actions if dedupe wiped everything this round.
+    session.actions = fresh.length
+      ? [...fresh, ...session.actions.filter((a) => !fresh.some((f) => f.id === a.id))].slice(0, 6)
+      : session.actions;
+    lastInsightsCount = snapshotCount;
+    broadcastSession();
+    appendLog(
+      'info',
+      `Gemini insights updated — topic “${session.topic}” (screen=${screenFrame ? 'yes' : 'no'}).`,
+    );
+  } catch (err) {
+    appendLog('warn', `Gemini insights failed: ${String(err)}`);
+  } finally {
+    insightsInFlight = false;
+  }
 }
 
 function setPanelOpen(panel: 'insights' | 'response', open: boolean): void {
@@ -853,14 +1324,24 @@ function registerIpc(): void {
   });
 
   ipcMain.handle('session:report-audio-activity', (_e, activity: AudioActivity) => {
-    session.audio = {
+    const next = {
       micLevel: clamp01(Number(activity?.micLevel) || 0),
       systemLevel: clamp01(Number(activity?.systemLevel) || 0),
       micActive: !!activity?.micActive,
       systemActive: !!activity?.systemActive,
     };
-    broadcastSession();
-    return getPublicSession();
+    const prev = session.audio;
+    const changed =
+      Math.abs(prev.micLevel - next.micLevel) > 0.03 ||
+      Math.abs(prev.systemLevel - next.systemLevel) > 0.03 ||
+      prev.micActive !== next.micActive ||
+      prev.systemActive !== next.systemActive;
+    session.audio = next;
+    if (changed) {
+      scheduleAudioBroadcast();
+    }
+    // Do not return the full session — cloning transcript on every meter tick lagged clicks.
+    return true;
   });
 
   ipcMain.handle(
@@ -870,7 +1351,14 @@ function registerIpc(): void {
       payload: { status: ListenStatus; error: string | null; modelReady: boolean },
     ) => {
       session.listenStatus = payload?.status ?? session.listenStatus;
-      session.listenError = payload?.error ? String(payload.error) : null;
+      const incomingError = payload?.error ? String(payload.error) : null;
+      const keepSonioxError =
+        !incomingError &&
+        payload?.status === 'listening' &&
+        !!session.listenError?.startsWith('Soniox');
+      if (!keepSonioxError) {
+        session.listenError = incomingError;
+      }
       session.modelReady = !!payload?.modelReady || isTranscriberReady();
       if (session.listenError) {
         appendLog('warn', `Listen status: ${session.listenStatus} — ${session.listenError}`);
@@ -899,19 +1387,15 @@ function registerIpc(): void {
       }
       const speaker = String(line?.speaker ?? 'You');
       const language = line?.language ? String(line.language) : null;
-      // Drop matching provisional line when a final arrives.
-      session.transcript = session.transcript.filter((t) => !t.id.startsWith('you-interim-'));
-      session.transcript = [
-        ...session.transcript,
-        {
-          id: line?.id || `t-${Date.now()}-${session.transcript.length}`,
-          speaker,
-          text,
-          language,
-          backend: line?.backend ?? getAsrBackend(),
-          latencyMs: line?.latencyMs ?? null,
-        },
-      ].slice(-200);
+      session.transcript = appendRollingTranscript(session.transcript, {
+        id: line?.id || `t-${Date.now()}-${session.transcript.length}`,
+        speaker,
+        text,
+        at: new Date().toISOString(),
+        language,
+        backend: line?.backend ?? getAsrBackend(),
+        latencyMs: line?.latencyMs ?? null,
+      });
       if (language) {
         session.detectedLanguage = language;
       }
@@ -919,6 +1403,7 @@ function registerIpc(): void {
         session.topic = 'Live conversation';
       }
       broadcastSession();
+      scheduleMeetingInsights();
       return getPublicSession();
     },
   );
@@ -931,7 +1416,16 @@ function registerIpc(): void {
     ) => {
       const text = String(line?.text ?? '').trim();
       const id = String(line?.id ?? '');
-      if (!text || !id) {
+      if (!id) {
+        return getPublicSession();
+      }
+      // Blank provisional text clears the live “…” placeholder.
+      if (!text) {
+        const before = session.transcript.length;
+        session.transcript = session.transcript.filter((t) => t.id !== id);
+        if (session.transcript.length !== before) {
+          broadcastSession();
+        }
         return getPublicSession();
       }
       const speaker = String(line?.speaker ?? 'You');
@@ -977,6 +1471,68 @@ function registerIpc(): void {
     return getTranscriberStatus();
   });
 
+  ipcMain.handle('listen:soniox-start', async (_event, requested: unknown) => {
+    const key = getSonioxApiKey();
+    if (!key) {
+      return {
+        ok: false,
+        error:
+          'SONIOX_API_KEY is missing. Add it to the gitignored .env file and restart Meeting Copilot.',
+      };
+    }
+    const sources = Array.isArray(requested)
+      ? requested.filter(
+          (item): item is SonioxSource => item === 'you' || item === 'system',
+        )
+      : [];
+    try {
+      const started = await startSoniox(
+        key,
+        sources.length ? sources : ['you', 'system'],
+        {
+        onLive: (source, text, language) => applySonioxLive(source, text, language),
+        onCommit: (source, text, language) => commitSonioxLine(source, text, language),
+        onError: (source, message) => {
+          appendLog('warn', `Soniox ${source}: ${message}`);
+          session.listenError = message;
+          broadcastSession();
+        },
+        onDiag: (line) => {
+          if (isDev) {
+            appendLog('info', line);
+          }
+        },
+      });
+      const opened = sources.length ? sources : ['you', 'system'];
+      appendLog('info', `Soniox stt-rt-v6 connected for ${opened.join(' and ')}.`);
+      return { ok: true, error: started.error };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      appendLog('error', `Soniox start failed: ${message}`);
+      return { ok: false, error: message };
+    }
+  });
+
+  ipcMain.handle('listen:soniox-stop', async () => {
+    await stopSoniox();
+    return true;
+  });
+
+  ipcMain.on(
+    'listen:soniox-audio',
+    (_event, payload: { source?: SonioxSource; pcm?: unknown }) => {
+      const source = payload?.source === 'system' || payload?.source === 'you' ? payload.source : null;
+      if (!source) {
+        return;
+      }
+      const pcm = coercePcm(payload?.pcm);
+      if (!pcm.length) {
+        return;
+      }
+      sendSonioxPcm(source, pcm);
+    },
+  );
+
   ipcMain.handle('listen:set-asr-backend', (_e, next: AsrBackendId) => {
     setAsrBackend(next);
     syncAsrSessionFields();
@@ -1001,17 +1557,27 @@ function registerIpc(): void {
     return getPublicSession();
   });
 
+  ipcMain.handle('session:set-screen-vision', (_e, enabled: boolean) => {
+    session.screenVisionEnabled = !!enabled;
+    if (!session.screenVisionEnabled) {
+      session.screenVisionError = null;
+    }
+    appendLog(
+      'info',
+      `Watch Screen ${session.screenVisionEnabled ? 'enabled' : 'disabled'}.`,
+    );
+    syncScreenWatchLoop();
+    broadcastSession();
+    return getPublicSession();
+  });
+
   ipcMain.handle(
     'listen:transcribe-pcm',
     async (
       _e,
-      payload: { source: 'you' | 'system'; sampleRate: number; pcm: number[] },
+      payload: { source: 'you' | 'system'; sampleRate: number; pcm: Float32Array | number[] },
     ) => {
-      const values = payload?.pcm ?? [];
-      const pcm = new Float32Array(values.length);
-      for (let i = 0; i < values.length; i += 1) {
-        pcm[i] = Number(values[i]) || 0;
-      }
+      const pcm = coercePcm(payload?.pcm);
       const sampleRate = Number(payload?.sampleRate) || 16000;
       if (!pcm.length) {
         return emptyTranscriptResult();
@@ -1114,12 +1680,17 @@ function registerIpc(): void {
     if (!action) {
       return getPublicSession();
     }
-    askWithPrompt(action.label, action.id);
+    askFromOrigin('insight', action.label, action.id, action.label);
     return getPublicSession();
   });
 
   ipcMain.handle('session:ask', (_e, prompt: string) => {
-    askWithPrompt(String(prompt ?? ''));
+    const typed = String(prompt ?? '').trim();
+    if (typed) {
+      askFromOrigin('typed', typed);
+    } else {
+      askFromOrigin('shortcut');
+    }
     return getPublicSession();
   });
 
@@ -1180,10 +1751,11 @@ function registerShortcuts(): void {
       ASK_ACCELERATOR,
       () => {
         session.panelsHidden = false;
-        if (session.followUpDraft.trim()) {
-          askWithPrompt(session.followUpDraft);
+        const typed = session.followUpDraft.trim();
+        if (typed) {
+          askFromOrigin('typed', typed);
         } else {
-          askWithPrompt('Suggest a reply');
+          askFromOrigin('shortcut');
         }
       },
     ],
@@ -1208,6 +1780,27 @@ app.whenReady().then(() => {
     'info',
     `Default panel size ${DEFAULT_PANEL_WIDTH}x${DEFAULT_PANEL_HEIGHT}`,
   );
+  const geminiReady = !!bootstrapGeminiApiKey();
+  appendLog(
+    'info',
+    geminiReady
+      ? 'Gemini API key loaded — Ask AI uses transcript + Watch Screen context.'
+      : 'Gemini API key missing — add GEMINI_API_KEY to .env and restart.',
+  );
+  const sonioxReady = !!bootstrapSonioxApiKey();
+  appendLog(
+    'info',
+    sonioxReady
+      ? 'Soniox API key loaded — selectable as a live transcription provider.'
+      : 'Soniox API key missing — add SONIOX_API_KEY to .env and restart.',
+  );
+  if (geminiReady) {
+    session.actions = defaultMeetingActions();
+  }
+  // Watch Screen stays on by default for every launch.
+  session.screenVisionEnabled = true;
+  syncScreenWatchLoop();
+  broadcastSession();
 
   electronSession.defaultSession.setPermissionRequestHandler(
     (_webContents, permission, callback) => {
@@ -1283,6 +1876,10 @@ app.on('will-quit', () => {
   setListening(false);
   stopElapsedTimer();
   stopStreaming();
+  if (screenWatchTimer) {
+    clearInterval(screenWatchTimer);
+    screenWatchTimer = null;
+  }
   globalShortcut.unregisterAll();
 });
 

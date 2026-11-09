@@ -9,3 +9,6 @@ release/
 Thumbs.db
 *.exe
 *.blockmap
+.env
+.env.*
+!.env.example

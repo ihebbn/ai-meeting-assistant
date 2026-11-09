@@ -112,8 +112,12 @@ function attachChildHandlers(proc: ChildProcess): void {
   });
   proc.stderr?.on('data', (buf: Buffer) => {
     const line = buf.toString().trim();
-    if (line) {
-      lastError = lastError || line.slice(0, 240);
+    // ONNX prints these while optimizing the Qwen graph. They are not a failure.
+    if (!line || /CleanUnusedInitializers|onnxruntime:.*graph\.cc/i.test(line)) {
+      return;
+    }
+    if (/error|fail|exception/i.test(line)) {
+      lastError = line.slice(0, 240);
     }
   });
 }
@@ -163,6 +167,8 @@ async function ensureWorker(): Promise<void> {
         ELECTRON_RUN_AS_NODE: '1',
       },
       stdio: ['pipe', 'pipe', 'pipe', 'ipc'],
+      // Structured clone keeps PCM as Float32Array instead of a giant JSON number list.
+      serialization: 'advanced',
     });
     child = proc;
     attachChildHandlers(proc);
@@ -227,19 +233,37 @@ export async function transcribeWithQwen(
   const languageHint =
     language === 'auto' ? null : LANGUAGE_HINTS[language] || null;
 
+  let resolvePending: (value: QwenTranscriptResult) => void = () => undefined;
   const resultPromise = new Promise<QwenTranscriptResult>((resolve, reject) => {
+    resolvePending = resolve;
     pending.set(id, { resolve, reject, generation });
   });
 
-  child.send({
-    type: 'transcribe',
-    id,
-    sampleRate,
-    languageHint,
-    pcm: Array.from(pcm),
-  });
+  let sent = false;
+  try {
+    sent = child.send({
+      type: 'transcribe',
+      id,
+      sampleRate,
+      languageHint,
+      pcm,
+    }) !== false;
+  } catch {
+    sent = false;
+  }
+  if (!sent) {
+    pending.delete(id);
+    resolvePending({
+      text: '',
+      language: null,
+      latencyMs: 0,
+      backend: 'qwen',
+    });
+    throw new Error('Qwen worker rejected audio (IPC backpressure).');
+  }
 
-  return withTimeout(resultPromise, 45_000, 'Qwen transcription timed out.');
+  // Fail fast so Whisper can take over instead of stalling live captions.
+  return withTimeout(resultPromise, 12_000, 'Qwen transcription timed out.');
 }
 
 function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {

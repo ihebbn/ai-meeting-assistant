@@ -21,6 +21,23 @@ export class SessionService implements OnDestroy {
     this.unsubscribe = api.onSessionUpdated?.((next) => this.session.set(next));
   }
 
+  /** Optimistic UI patch so toolbar clicks feel instant before IPC returns. */
+  patchLocal(partial: Partial<SessionView>): void {
+    const cur = this.session();
+    if (!cur) {
+      return;
+    }
+    const next: SessionView = { ...cur, ...partial };
+    const panelsHidden = next.panelsHidden;
+    const insightsOpen = next.insightsOpen;
+    const responseOpen = next.responseOpen;
+    next.insightsVisible = !panelsHidden && insightsOpen;
+    next.responseVisible = !panelsHidden && responseOpen;
+    next.anyPanelOpen = !panelsHidden && (insightsOpen || responseOpen);
+    next.bothPanelsOpen = !panelsHidden && insightsOpen && responseOpen;
+    this.session.set(next);
+  }
+
   ngOnDestroy(): void {
     this.unsubscribe?.();
   }

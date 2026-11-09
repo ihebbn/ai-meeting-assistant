@@ -1,4 +1,4 @@
-export type AsrBackendId = 'qwen' | 'whisper';
+export type AsrBackendId = 'qwen' | 'whisper' | 'soniox';
 
 /** Auto leaves the model language hint unset so each segment is detected. */
 export type AsrLanguageId = 'auto' | 'en' | 'fr' | 'ar';
@@ -38,4 +38,5 @@ export const LANGUAGE_LABELS: Record<AsrLanguageId, string> = {
 export const BACKEND_LABELS: Record<AsrBackendId, string> = {
   qwen: 'Qwen3-ASR 0.6B INT8',
   whisper: 'Whisper base',
+  soniox: 'Soniox stt-rt-v6',
 };
